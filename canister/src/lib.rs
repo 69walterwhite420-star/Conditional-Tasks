@@ -382,10 +382,14 @@ fn process_due(now: u64) {
             continue;
         };
         let mut task = record.to_logic();
+        // On success the state always advances to Decided and is re-saved. A
+        // failed tick (only an unreachable arithmetic overflow) leaves the
+        // record untouched and out of the due index — never re-inserting a
+        // past-due entry that would spin this loop.
         if logic::step(&mut task, logic::Action::Tick, now).is_ok() {
             record.absorb(&task);
+            save_task(&record);
         }
-        save_task(&record);
     }
 }
 

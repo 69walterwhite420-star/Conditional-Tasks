@@ -187,15 +187,9 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
     let key = crate::task_key(&arg.chain, &arg.task_id);
     let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
 
-    // Time first, persisted: a late timer never extends the window.
-    let mut task = record.to_logic();
-    logic::step(&mut task, logic::Action::Tick, crate::now_seconds()).map_err(step_error_text)?;
-    record.absorb(&task);
-    crate::save_task(&record);
-    if !matches!(record.state, crate::StateView::Voting { .. }) {
-        return Err("invalid transition".to_string());
-    }
-
+    // Authorize before touching state: a bogus signature must never cost a
+    // certified write. The message binds neither time nor state, so it is
+    // checked first (game-spec §6: signature, dedup, then weight).
     let choice_byte = match arg.choice {
         crate::ChoiceView::Done => auth::CHOICE_DONE,
         crate::ChoiceView::NotDone => auth::CHOICE_NOT_DONE,
@@ -209,6 +203,15 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
     );
     auth::verify_wallet_signature(spec.kind(), &message, &arg.signature, &arg.voter)
         .map_err(|e| e.text().to_string())?;
+
+    // Time first, persisted: a late timer never extends the window.
+    let mut task = record.to_logic();
+    logic::step(&mut task, logic::Action::Tick, crate::now_seconds()).map_err(step_error_text)?;
+    record.absorb(&task);
+    crate::save_task(&record);
+    if !matches!(record.state, crate::StateView::Voting { .. }) {
+        return Err("invalid transition".to_string());
+    }
 
     // Dedup before paying for the book call; the machine dedups again after.
     if record.votes.iter().any(|vote| vote.voter == arg.voter) {
