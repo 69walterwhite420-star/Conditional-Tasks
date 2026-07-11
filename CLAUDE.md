@@ -39,7 +39,7 @@ conditional-tasks/
 │  └─ src/{lib,task,vote,verdict}.rs
 ├─ canister/               # КАНИСТРА. Ingress, подписи, вес, threshold, сертификация.
 │  ├─ conditional-tasks.did
-│  └─ src/{lib,api,auth,weight,sign,certify}.rs
+│  └─ src/{lib,api,auth,certify}.rs   # weight.rs — G3, sign.rs — G4
 ├─ config/
 │  ├─ testnet.toml
 │  └─ mainnet.toml

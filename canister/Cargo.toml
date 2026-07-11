@@ -7,3 +7,23 @@ edition = "2024"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
+conditional-tasks-logic = { path = "../logic" }
+crown-derive = { version = "0.1.0", path = "../../../Crown-Factory/derive" }
+candid = "0.10"
+ic-cdk = "0.20"
+ic-stable-structures = "0.7"
+ic-certified-map = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde_cbor = "0.11"
+sha2 = "0.10"
+sha3 = "0.10"
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
+bs58 = "0.5"
+
+[dev-dependencies]
+pocket-ic = "10"
+hex = "0.4"
+ic-certification = "3"
+ic-verify-bls-signature = "0.6"

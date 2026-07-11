@@ -1,0 +1,63 @@
+//! Bakes the selected config profile (config/{testnet|mainnet}.toml, chosen by
+//! CROWN_PROFILE, default testnet) into the wasm as a chain table. The frozen
+//! canister has no runtime config channel; environment swap = profile swap.
+
+use std::env;
+use std::fs;
+use std::path::Path;
+
+fn value_of_opt(block: &str, key: &str) -> Option<String> {
+    for line in block.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if let Some((k, v)) = line.split_once('=')
+            && k.trim() == key
+        {
+            return Some(v.trim().trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
+fn value_of(block: &str, key: &str, context: &str) -> String {
+    value_of_opt(block, key).unwrap_or_else(|| panic!("{context}: chain entry without `{key}`"))
+}
+
+fn main() {
+    let profile = env::var("CROWN_PROFILE").unwrap_or_else(|_| "testnet".to_string());
+    println!("cargo:rerun-if-env-changed=CROWN_PROFILE");
+    let manifest = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let path = Path::new(&manifest).join(format!("../config/{profile}.toml"));
+    println!("cargo:rerun-if-changed={}", path.display());
+    let toml =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    let mut chains = String::new();
+    for block in toml.split("[[chain]]").skip(1) {
+        let context = format!("config/{profile}.toml");
+        let get = |key: &str| value_of(block, key, &context);
+        let opt = |key: &str| value_of_opt(block, key).unwrap_or_default();
+        chains.push_str(&format!(
+            "    ChainSpec {{ id: {id:?}, factory: {factory:?}, \
+             escrow_init_code_hash: {hash:?}, evm_chain_id: {chain_id}, \
+             domain: {domain:?}, min_gross: {min_gross} }},\n",
+            id = get("id"),
+            factory = get("factory"),
+            hash = opt("escrow_init_code_hash"),
+            chain_id = value_of_opt(block, "evm_chain_id").unwrap_or_else(|| "0".to_string()),
+            domain = opt("domain"),
+            min_gross = get("min_gross"),
+        ));
+    }
+
+    let out = Path::new(&env::var("OUT_DIR").unwrap()).join("profile.rs");
+    fs::write(
+        out,
+        format!(
+            "/// Config profile baked into this build.\n\
+             pub const PROFILE: &str = {profile:?};\n\
+             /// Chain table from config/{profile}.toml.\n\
+             pub const CHAINS: &[ChainSpec] = &[\n{chains}];\n"
+        ),
+    )
+    .unwrap();
+}

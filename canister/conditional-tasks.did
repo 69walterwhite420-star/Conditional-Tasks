@@ -1,4 +1,79 @@
 // Update surface is frozen: only {register_task, accept, decline, done,
 // vote, set_channel_params} may ever appear as non-query methods; the CI
-// lint fails on anything else. Methods are added stage by stage (G2, G3).
-service : {}
+// lint fails on anything else. `vote` arrives at G3.
+
+type Outcome = variant { settle; cancel };
+type State = variant {
+  created;
+  accepted;
+  voting : record { started_at : nat64 };
+  decided : record { outcome : Outcome };
+};
+type Choice = variant { done; not_done };
+type Vote = record { voter : blob; choice : Choice; weight : nat };
+type Task = record {
+  chain : text;
+  task_id : blob;
+  donor : blob;
+  streamer : blob;
+  gross : nat64;
+  deadline : nat64;
+  resolver : blob;
+  nonce : nat64;
+  text_hash : blob;
+  registered_at : nat64;
+  duration : nat64;
+  state : State;
+  votes : vec Vote;
+};
+type Channel = record {
+  min_gross : nat64;
+  min_reputation : nat;
+  enabled : bool;
+  counter : nat64;
+};
+type CertifiedTask = record {
+  data : blob;
+  certificate : opt blob;
+  witness : blob;
+};
+type RegisterArg = record {
+  chain : text;
+  donor : blob;
+  streamer : blob;
+  gross : nat64;
+  deadline : nat64;
+  resolver : blob;
+  nonce : nat64;
+  duration : nat64;
+  text_hash : blob;
+  signature : blob;
+};
+type ActionArg = record {
+  chain : text;
+  task_id : blob;
+  signature : blob;
+};
+type ChannelArg = record {
+  chain : text;
+  streamer : blob;
+  min_gross : nat64;
+  min_reputation : nat;
+  enabled : bool;
+  counter : nat64;
+  signature : blob;
+};
+type RegisterResult = variant { Ok : blob; Err : text };
+type ActionResult = variant { Ok; Err : text };
+
+service : {
+  register_task : (RegisterArg) -> (RegisterResult);
+  accept : (ActionArg) -> (ActionResult);
+  decline : (ActionArg) -> (ActionResult);
+  done : (ActionArg) -> (ActionResult);
+  set_channel_params : (ChannelArg) -> (ActionResult);
+  get_task : (text, blob) -> (opt CertifiedTask) query;
+  list_tasks : (text, blob) -> (vec blob) query;
+  get_channel : (text, blob) -> (opt Channel) query;
+  get_logic_version : () -> (nat32) query;
+}
