@@ -1,6 +1,6 @@
 // Update surface is frozen: only {register_task, accept, decline, done,
 // vote, set_channel_params} may ever appear as non-query methods; the CI
-// lint fails on anything else. `vote` arrives at G3.
+// lint fails on anything else.
 
 type Outcome = variant { settle; cancel };
 type State = variant {
@@ -54,6 +54,13 @@ type ActionArg = record {
   task_id : blob;
   signature : blob;
 };
+type VoteArg = record {
+  chain : text;
+  task_id : blob;
+  voter : blob;
+  choice : Choice;
+  signature : blob;
+};
 type ChannelArg = record {
   chain : text;
   streamer : blob;
@@ -71,6 +78,7 @@ service : {
   accept : (ActionArg) -> (ActionResult);
   decline : (ActionArg) -> (ActionResult);
   done : (ActionArg) -> (ActionResult);
+  vote : (VoteArg) -> (ActionResult);
   set_channel_params : (ChannelArg) -> (ActionResult);
   get_task : (text, blob) -> (opt CertifiedTask) query;
   list_tasks : (text, blob) -> (vec blob) query;

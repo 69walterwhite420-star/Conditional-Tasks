@@ -23,6 +23,10 @@ pub const ACTION_DONE: u8 = 3;
 pub const ACTION_VOTE: u8 = 4;
 pub const ACTION_SET_CHANNEL_PARAMS: u8 = 5;
 
+/// Vote payload bytes (the single payload byte of ACTION_VOTE).
+pub const CHOICE_DONE: u8 = 0;
+pub const CHOICE_NOT_DONE: u8 = 1;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChainKind {
     Evm,
@@ -343,6 +347,11 @@ mod tests {
         expected.push(1);
         expected.extend(0u32.to_le_bytes());
         assert_eq!(message, expected);
+    }
+
+    #[test]
+    fn choice_bytes_are_pinned() {
+        assert_eq!((CHOICE_DONE, CHOICE_NOT_DONE), (0, 1));
     }
 
     #[test]

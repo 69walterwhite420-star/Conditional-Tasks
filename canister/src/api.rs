@@ -56,9 +56,10 @@ pub struct RegisterArg {
 
 /// Registers a task: derives task_id from the declared birth fields, checks
 /// the donor's signature over (task_id, text commitment, duration), validates
-/// against the channel knobs and births the machine in CREATED.
+/// against the channel knobs and births the machine in CREATED. Channels
+/// that demand reputation read the donor's book value from crown-index.
 #[ic_cdk::update]
-fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
+async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
     let spec = auth::spec_of(&arg.chain).map_err(|e| e.text().to_string())?;
     if arg.text_hash.len() != 32 {
         return Err("text hash must be 32 bytes".to_string());
@@ -89,6 +90,16 @@ fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
         .map_err(|e| e.text().to_string())?;
 
     let channel = crate::load_channel(&arg.chain, &arg.streamer, spec.min_gross);
+    let donor_reputation = if channel.min_reputation > 0 {
+        crate::weight::book_value(&arg.chain, &arg.donor, &arg.streamer).await?
+    } else {
+        0
+    };
+    // The book call yields execution: another message may have registered
+    // the same task across the await. The stored record must never flip.
+    if crate::task_exists(&key) {
+        return Err("task already registered".to_string());
+    }
     let now = crate::now_seconds();
     let task = logic::register(
         now,
@@ -102,9 +113,7 @@ fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
             gross: arg.gross,
             duration: arg.duration,
             deadline: arg.deadline,
-            // G3 wires the real book value; zero rejects every registration
-            // on channels that demand reputation — conservative until then.
-            donor_reputation: 0,
+            donor_reputation,
         },
     )
     .map_err(register_error_text)?;
@@ -149,6 +158,74 @@ fn decline(arg: ActionArg) -> Result<(), String> {
 #[ic_cdk::update]
 fn done(arg: ActionArg) -> Result<(), String> {
     streamer_action(arg, logic::Action::Done, auth::ACTION_DONE)
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct VoteArg {
+    pub chain: String,
+    pub task_id: ByteBuf,
+    pub voter: ByteBuf,
+    pub choice: crate::ChoiceView,
+    pub signature: ByteBuf,
+}
+
+/// One vote (docs/game-spec.md §6). Order: clock, signature, dedup, then the
+/// paid weight call; the machine revalidates everything after the await —
+/// the voting window may have closed while the book was answering.
+#[ic_cdk::update]
+async fn vote(arg: VoteArg) -> Result<(), String> {
+    let spec = auth::spec_of(&arg.chain).map_err(|e| e.text().to_string())?;
+    let key = crate::task_key(&arg.chain, &arg.task_id);
+    let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
+
+    // Time first, persisted: a late timer never extends the window.
+    let mut task = record.to_logic();
+    logic::step(&mut task, logic::Action::Tick, crate::now_seconds()).map_err(step_error_text)?;
+    record.absorb(&task);
+    crate::save_task(&record);
+    if !matches!(record.state, crate::StateView::Voting { .. }) {
+        return Err("invalid transition".to_string());
+    }
+
+    let choice_byte = match arg.choice {
+        crate::ChoiceView::Done => auth::CHOICE_DONE,
+        crate::ChoiceView::NotDone => auth::CHOICE_NOT_DONE,
+    };
+    let message = auth::task_message(
+        &arg.chain,
+        &canister_id(),
+        &arg.task_id,
+        auth::ACTION_VOTE,
+        &[choice_byte],
+    );
+    auth::verify_wallet_signature(spec.kind(), &message, &arg.signature, &arg.voter)
+        .map_err(|e| e.text().to_string())?;
+
+    // Dedup before paying for the book call; the machine dedups again after.
+    if record.votes.iter().any(|vote| vote.voter == arg.voter) {
+        return Err("duplicate voter".to_string());
+    }
+
+    let weight = crate::weight::book_value(&arg.chain, &arg.voter, &record.streamer).await?;
+
+    // The await yielded: reload the truth and let the machine judge.
+    let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
+    let mut task = record.to_logic();
+    let result = logic::step(
+        &mut task,
+        logic::Action::Vote(logic::Vote {
+            voter: logic::Voter(arg.voter.to_vec()),
+            choice: match arg.choice {
+                crate::ChoiceView::Done => logic::Choice::Done,
+                crate::ChoiceView::NotDone => logic::Choice::NotDone,
+            },
+            weight,
+        }),
+        crate::now_seconds(),
+    );
+    record.absorb(&task);
+    crate::save_task(&record);
+    result.map_err(step_error_text)
 }
 
 /// The three streamer moves share one path: load, verify the streamer's

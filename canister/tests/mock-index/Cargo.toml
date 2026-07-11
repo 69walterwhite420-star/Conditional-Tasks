@@ -1,0 +1,16 @@
+# Test double of crown-index for PocketIC runs. Not a workspace member:
+# it exists only as a wasm the integration tests install next to the game.
+[package]
+name = "mock-crown-index"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+candid = "0.10"
+ic-cdk = "0.20"
+serde_bytes = "0.11"
+
+[workspace]

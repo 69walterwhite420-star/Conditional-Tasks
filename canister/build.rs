@@ -31,6 +31,10 @@ fn main() {
     let toml =
         fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
 
+    // Top-level crown_index principal; the part before the first [[chain]].
+    let head = toml.split("[[chain]]").next().unwrap_or_default();
+    let crown_index = value_of_opt(head, "crown_index").unwrap_or_default();
+
     let mut chains = String::new();
     for block in toml.split("[[chain]]").skip(1) {
         let context = format!("config/{profile}.toml");
@@ -55,6 +59,8 @@ fn main() {
         format!(
             "/// Config profile baked into this build.\n\
              pub const PROFILE: &str = {profile:?};\n\
+             /// The book canister; empty until a real deploy pins it.\n\
+             pub const CROWN_INDEX: &str = {crown_index:?};\n\
              /// Chain table from config/{profile}.toml.\n\
              pub const CHAINS: &[ChainSpec] = &[\n{chains}];\n"
         ),

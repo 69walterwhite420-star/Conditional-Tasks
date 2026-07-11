@@ -8,6 +8,7 @@
 pub mod api;
 pub mod auth;
 pub mod certify;
+pub mod weight;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -16,7 +17,7 @@ use std::time::Duration;
 use candid::{CandidType, Decode, Encode};
 use conditional_tasks_logic as logic;
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap};
+use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableCell};
 use serde::Deserialize;
 
 /// One chain the game serves; baked from config/ at build time.
@@ -39,6 +40,7 @@ pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 pub(crate) const TASKS_MEMORY: MemoryId = MemoryId::new(0);
 pub(crate) const CHANNELS_MEMORY: MemoryId = MemoryId::new(1);
+pub(crate) const CROWN_INDEX_MEMORY: MemoryId = MemoryId::new(2);
 
 /// The timer only backstops "time first" inside every step: a late tick can
 /// delay a due transition, never corrupt it.
@@ -59,6 +61,11 @@ thread_local! {
     /// truth, rebuilt on upgrade. Stale entries are harmless: processing a
     /// task recomputes its real due time.
     static DUE: RefCell<BTreeSet<(u64, Vec<u8>)>> = const { RefCell::new(BTreeSet::new()) };
+
+    /// Local-testing override of the crown-index principal; empty on real
+    /// deploys, where the baked config value is the only authority.
+    static CROWN_INDEX_OVERRIDE: RefCell<StableCell<Vec<u8>, Memory>> =
+        RefCell::new(StableCell::init(memory(CROWN_INDEX_MEMORY), Vec::new()));
 }
 
 pub(crate) fn memory(id: MemoryId) -> Memory {
@@ -335,12 +342,31 @@ fn schedule_tick(delay: Duration) {
     ic_cdk::api::global_timer_set(now.saturating_add(delay.as_nanos() as u64));
 }
 
+pub(crate) fn crown_index() -> Option<candid::Principal> {
+    CROWN_INDEX_OVERRIDE.with_borrow(|cell| weight::resolve(cell.get(), CROWN_INDEX))
+}
+
 // ---- lifecycle ---------------------------------------------------------------
 
+/// Local-testing overrides, for replicas where the real crown-index does not
+/// exist. Forbidden on mainnet: there the baked config is the only truth.
+#[derive(CandidType, Deserialize)]
+pub struct Overrides {
+    pub crown_index: Option<candid::Principal>,
+}
+
 #[ic_cdk::init]
-fn init() {
+fn init(overrides: Option<Overrides>) {
     if let Err(error) = auth::validate_config() {
         ic_cdk::trap(error.text());
+    }
+    if let Some(overrides) = overrides {
+        if PROFILE == "mainnet" {
+            ic_cdk::trap("mainnet profile: overrides are forbidden");
+        }
+        if let Some(principal) = overrides.crown_index {
+            CROWN_INDEX_OVERRIDE.with_borrow_mut(|cell| cell.set(principal.as_slice().to_vec()));
+        }
     }
     certify::recertify();
     schedule_tick(Duration::from_secs(1));
