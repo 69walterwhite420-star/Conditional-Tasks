@@ -12,3 +12,14 @@
     clippy::arithmetic_side_effects,
     clippy::indexing_slicing
 )]
+
+pub mod task;
+pub mod verdict;
+pub mod vote;
+
+pub use task::{
+    Action, ChannelParams, DEADLINE_MARGIN, LOGIC_VERSION, MAX_DURATION, MIN_DURATION,
+    RegisterError, Registration, State, StepError, Task, VOTING_PERIOD, register, step,
+};
+pub use verdict::{Outcome, VerdictError, verdict};
+pub use vote::{Choice, MIN_VOTE_WEIGHT, Vote, Voter};
