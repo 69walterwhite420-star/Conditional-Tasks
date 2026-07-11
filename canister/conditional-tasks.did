@@ -1,0 +1,4 @@
+// Update surface is frozen: only {register_task, accept, decline, done,
+// vote, set_channel_params} may ever appear as non-query methods; the CI
+// lint fails on anything else. Methods are added stage by stage (G2, G3).
+service : {}

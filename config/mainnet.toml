@@ -1,0 +1,6 @@
+# Условные задания — mainnet profile.
+#
+# Те же ключи, что в testnet.toml (docs/game-spec.md §7).
+#
+# Заполняется на G5: сети из mainnet-профилей ядра и фабрики, principal
+# боевого crown-index. До готовности всей платформы здесь пусто.

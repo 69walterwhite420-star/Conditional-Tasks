@@ -1,0 +1,9 @@
+{
+  "canisters": {
+    "conditional-tasks": {
+      "type": "rust",
+      "package": "conditional-tasks",
+      "candid": "canister/conditional-tasks.did"
+    }
+  }
+}
