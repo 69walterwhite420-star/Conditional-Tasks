@@ -13,7 +13,8 @@ use crate::vote::{MIN_VOTE_WEIGHT, Vote};
 pub const LOGIC_VERSION: u32 = 1;
 
 /// All times are unix seconds; time is always an argument, never a syscall.
-pub const VOTING_PERIOD: u64 = 3_600; // 1 hour
+/// The voting period is a birth parameter of the task (profile-scoped in the
+/// canister config); the rest are constants of the rules.
 pub const MIN_DURATION: u64 = 60; // 1 minute
 pub const MAX_DURATION: u64 = 2_592_000; // 30 days
 pub const DEADLINE_MARGIN: u64 = 259_200; // 72 hours
@@ -49,6 +50,9 @@ pub enum State {
 pub struct Task {
     pub registered_at: u64,
     pub duration: u64,
+    /// Fixed at registration from the canister's profile; a task carries its
+    /// own clock rules forever.
+    pub voting_period: u64,
     pub state: State,
     /// Non-empty only from VOTING on; published forever after the verdict.
     pub votes: Vec<Vote>,
@@ -95,6 +99,7 @@ pub fn register(
     now: u64,
     channel: &ChannelParams,
     floor: u64,
+    voting_period: u64,
     registration: &Registration,
 ) -> Result<Task, RegisterError> {
     if !channel.enabled {
@@ -114,7 +119,7 @@ pub fn register(
     }
     let earliest_deadline = now
         .checked_add(registration.duration)
-        .and_then(|t| t.checked_add(VOTING_PERIOD))
+        .and_then(|t| t.checked_add(voting_period))
         .and_then(|t| t.checked_add(DEADLINE_MARGIN))
         .ok_or(RegisterError::TimeOverflow)?;
     if registration.deadline < earliest_deadline {
@@ -123,6 +128,7 @@ pub fn register(
     Ok(Task {
         registered_at: now,
         duration: registration.duration,
+        voting_period,
         state: State::Created,
         votes: Vec::new(),
     })
@@ -193,7 +199,7 @@ fn advance(task: &mut Task, now: u64) -> Result<(), StepError> {
         }
         State::Voting { started_at } => {
             let end = started_at
-                .checked_add(VOTING_PERIOD)
+                .checked_add(task.voting_period)
                 .ok_or(StepError::Overflow)?;
             if now >= end {
                 let outcome =
@@ -222,6 +228,7 @@ mod tests {
 
     const T0: u64 = 1_700_000_000;
     const DURATION: u64 = 86_400; // 1 day
+    const VOTING_PERIOD: u64 = 3_600;
 
     fn channel() -> ChannelParams {
         ChannelParams {
@@ -241,7 +248,7 @@ mod tests {
     }
 
     fn fresh() -> Task {
-        register(T0, &channel(), 34, &registration()).unwrap()
+        register(T0, &channel(), 34, VOTING_PERIOD, &registration()).unwrap()
     }
 
     fn vote(voter: u8, choice: Choice, weight: u128) -> Vote {
@@ -500,7 +507,7 @@ mod tests {
             ..ch.clone()
         };
         assert_eq!(
-            register(T0, &disabled, 34, &reg),
+            register(T0, &disabled, 34, VOTING_PERIOD, &reg),
             Err(RegisterError::ChannelDisabled)
         );
 
@@ -509,7 +516,7 @@ mod tests {
             ..reg.clone()
         };
         assert_eq!(
-            register(T0, &ch, 34, &below_floor),
+            register(T0, &ch, 34, VOTING_PERIOD, &below_floor),
             Err(RegisterError::GrossBelowFloor)
         );
 
@@ -522,7 +529,7 @@ mod tests {
             ..reg.clone()
         };
         assert_eq!(
-            register(T0, &strict, 34, &below_channel),
+            register(T0, &strict, 34, VOTING_PERIOD, &below_channel),
             Err(RegisterError::GrossBelowChannelMinimum)
         );
 
@@ -531,7 +538,7 @@ mod tests {
             ..ch.clone()
         };
         assert_eq!(
-            register(T0, &reputable, 34, &reg),
+            register(T0, &reputable, 34, VOTING_PERIOD, &reg),
             Err(RegisterError::ReputationBelowMinimum)
         );
 
@@ -540,7 +547,7 @@ mod tests {
             ..reg.clone()
         };
         assert_eq!(
-            register(T0, &ch, 34, &short),
+            register(T0, &ch, 34, VOTING_PERIOD, &short),
             Err(RegisterError::DurationOutOfRange)
         );
         let long = Registration {
@@ -548,7 +555,7 @@ mod tests {
             ..reg.clone()
         };
         assert_eq!(
-            register(T0, &ch, 34, &long),
+            register(T0, &ch, 34, VOTING_PERIOD, &long),
             Err(RegisterError::DurationOutOfRange)
         );
 
@@ -557,13 +564,13 @@ mod tests {
             deadline: T0 + DURATION + VOTING_PERIOD + DEADLINE_MARGIN,
             ..reg.clone()
         };
-        assert!(register(T0, &ch, 34, &exact).is_ok());
+        assert!(register(T0, &ch, 34, VOTING_PERIOD, &exact).is_ok());
         let tight = Registration {
             deadline: T0 + DURATION + VOTING_PERIOD + DEADLINE_MARGIN - 1,
             ..reg
         };
         assert_eq!(
-            register(T0, &ch, 34, &tight),
+            register(T0, &ch, 34, VOTING_PERIOD, &tight),
             Err(RegisterError::DeadlineTooTight)
         );
     }

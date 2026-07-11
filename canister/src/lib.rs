@@ -8,6 +8,7 @@
 pub mod api;
 pub mod auth;
 pub mod certify;
+pub mod sign;
 pub mod weight;
 
 use std::cell::RefCell;
@@ -41,6 +42,8 @@ pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub(crate) const TASKS_MEMORY: MemoryId = MemoryId::new(0);
 pub(crate) const CHANNELS_MEMORY: MemoryId = MemoryId::new(1);
 pub(crate) const CROWN_INDEX_MEMORY: MemoryId = MemoryId::new(2);
+pub(crate) const ECDSA_KEY_MEMORY: MemoryId = MemoryId::new(3);
+pub(crate) const SCHNORR_KEY_MEMORY: MemoryId = MemoryId::new(4);
 
 /// The timer only backstops "time first" inside every step: a late tick can
 /// delay a due transition, never corrupt it.
@@ -66,6 +69,20 @@ thread_local! {
     /// deploys, where the baked config value is the only authority.
     static CROWN_INDEX_OVERRIDE: RefCell<StableCell<Vec<u8>, Memory>> =
         RefCell::new(StableCell::init(memory(CROWN_INDEX_MEMORY), Vec::new()));
+
+    /// Cached threshold public keys (sec1 secp256k1 / ed25519); fetched by
+    /// the timer once and then immutable — the keys derive from canister_id.
+    static ECDSA_PUBLIC_KEY: RefCell<StableCell<Vec<u8>, Memory>> =
+        RefCell::new(StableCell::init(memory(ECDSA_KEY_MEMORY), Vec::new()));
+    static SCHNORR_PUBLIC_KEY: RefCell<StableCell<Vec<u8>, Memory>> =
+        RefCell::new(StableCell::init(memory(SCHNORR_KEY_MEMORY), Vec::new()));
+
+    /// Task keys with a recorded verdict awaiting the threshold signature;
+    /// heap index over stable truth, rebuilt on upgrade.
+    static PENDING_SIGN: RefCell<BTreeSet<Vec<u8>>> = const { RefCell::new(BTreeSet::new()) };
+
+    /// One sweep at a time; a trapped round never wedges the next.
+    static SWEEPING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 pub(crate) fn memory(id: MemoryId) -> Memory {
@@ -126,8 +143,12 @@ pub struct TaskRecord {
     pub text_hash: serde_bytes::ByteBuf,
     pub registered_at: u64,
     pub duration: u64,
+    pub voting_period: u64,
     pub state: StateView,
     pub votes: Vec<VoteView>,
+    /// The threshold signature of the recorded verdict; appears once, soon
+    /// after the decision, and never changes (game-spec §8).
+    pub verdict_signature: Option<serde_bytes::ByteBuf>,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -175,6 +196,7 @@ impl TaskRecord {
         logic::Task {
             registered_at: self.registered_at,
             duration: self.duration,
+            voting_period: self.voting_period,
             state: state_from_view(&self.state),
             votes: self
                 .votes
@@ -260,7 +282,37 @@ pub(crate) fn save_task(record: &TaskRecord) {
     certify::upsert(&key, &bytes);
     if let Some(due) = due_of(record) {
         DUE.with_borrow_mut(|set| set.insert((due, key)));
+    } else if record.verdict_signature.is_none() {
+        PENDING_SIGN.with_borrow_mut(|set| {
+            set.insert(key);
+        });
     }
+}
+
+pub(crate) fn take_pending_signatures() -> Vec<Vec<u8>> {
+    PENDING_SIGN.with_borrow_mut(|set| std::mem::take(set).into_iter().collect())
+}
+
+pub(crate) fn requeue_signature(key: Vec<u8>) {
+    PENDING_SIGN.with_borrow_mut(|set| {
+        set.insert(key);
+    });
+}
+
+pub(crate) fn ecdsa_public_key_bytes() -> Vec<u8> {
+    ECDSA_PUBLIC_KEY.with_borrow(|cell| cell.get().clone())
+}
+
+pub(crate) fn set_ecdsa_public_key(key: Vec<u8>) {
+    ECDSA_PUBLIC_KEY.with_borrow_mut(|cell| cell.set(key));
+}
+
+pub(crate) fn schnorr_public_key_bytes() -> Vec<u8> {
+    SCHNORR_PUBLIC_KEY.with_borrow(|cell| cell.get().clone())
+}
+
+pub(crate) fn set_schnorr_public_key(key: Vec<u8>) {
+    SCHNORR_PUBLIC_KEY.with_borrow_mut(|cell| cell.set(key));
 }
 
 fn due_of(record: &TaskRecord) -> Option<u64> {
@@ -268,7 +320,7 @@ fn due_of(record: &TaskRecord) -> Option<u64> {
         StateView::Created | StateView::Accepted => {
             Some(record.registered_at.saturating_add(record.duration))
         }
-        StateView::Voting { started_at } => Some(started_at.saturating_add(logic::VOTING_PERIOD)),
+        StateView::Voting { started_at } => Some(started_at.saturating_add(record.voting_period)),
         StateView::Decided { .. } => None,
     }
 }
@@ -384,17 +436,41 @@ fn post_upgrade() {
             .collect::<Vec<_>>()
             .into_iter()
     }));
-    DUE.with_borrow_mut(|set| {
-        TASKS.with_borrow(|tasks| {
-            for entry in tasks.iter() {
-                let record = decode_task(&entry.value());
-                if let Some(due) = due_of(&record) {
+    TASKS.with_borrow(|tasks| {
+        for entry in tasks.iter() {
+            let record = decode_task(&entry.value());
+            if let Some(due) = due_of(&record) {
+                DUE.with_borrow_mut(|set| {
                     set.insert((due, entry.key().clone()));
-                }
+                });
+            } else if record.verdict_signature.is_none() {
+                PENDING_SIGN.with_borrow_mut(|set| {
+                    set.insert(entry.key().clone());
+                });
             }
-        });
+        }
     });
     schedule_tick(Duration::from_secs(1));
+}
+
+/// Resets the sweep flag even when the round's task is cancelled by a trap,
+/// so one failed round can never wedge the sweeps forever.
+struct SweepGuard;
+
+impl Drop for SweepGuard {
+    fn drop(&mut self) {
+        SWEEPING.with(|flag| flag.set(false));
+    }
+}
+
+async fn sweep() {
+    if SWEEPING.with(|flag| flag.replace(true)) {
+        return;
+    }
+    let _guard = SweepGuard;
+    sign::ensure_resolver_keys().await;
+    process_due(now_seconds());
+    sign::sign_pending().await;
 }
 
 #[cfg_attr(target_family = "wasm", unsafe(export_name = "canister_global_timer"))]
@@ -402,5 +478,7 @@ fn post_upgrade() {
 fn global_timer() {
     // Re-arm first: a trap inside the sweep must not stop the schedule.
     schedule_tick(TICK_INTERVAL);
-    process_due(now_seconds());
+    ic_cdk::futures::internals::in_executor_context(|| {
+        ic_cdk::futures::spawn(sweep());
+    });
 }

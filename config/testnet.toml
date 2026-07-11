@@ -8,7 +8,14 @@
 # factory / escrow_init_code_hash / min_gross копируются из
 # crown-factory/deploy/testnet.toml; этот репозиторий их не порождает.
 # crown_index — локальная канистра: principal зависит от деплоя и
-# подставляется e2e-скриптом через config/local.toml (gitignored), как в ядре.
+# подставляется через init-оверрайд (на mainnet-профиле оверрайды трапаются).
+# threshold_key — имя threshold-ключа среды; локальная реплика dfx и
+# PocketIC дают то же имя, что прод: key_1.
+
+threshold_key = "key_1"
+# Сжатые часы тестовых сетей: голосование 2 минуты. Прод-значение — час,
+# в mainnet.toml; задание несёт свой период с рождения.
+voting_period = 120
 
 [[chain]]
 id                    = "eth-sepolia"

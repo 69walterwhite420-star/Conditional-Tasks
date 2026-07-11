@@ -78,6 +78,12 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
     if crate::task_exists(&key) {
         return Err("task already registered".to_string());
     }
+    // The escrow must name this canister's key: a task no verdict can ever
+    // unlock is not a task.
+    let resolver = crate::sign::resolver_for(spec).ok_or("resolver key not ready")?;
+    if arg.resolver.as_slice() != resolver.as_slice() {
+        return Err("resolver is not this canister's key".to_string());
+    }
 
     let message = auth::task_message(
         &arg.chain,
@@ -109,6 +115,7 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
             enabled: channel.enabled,
         },
         spec.min_gross,
+        crate::VOTING_PERIOD,
         &logic::Registration {
             gross: arg.gross,
             duration: arg.duration,
@@ -130,8 +137,10 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
         text_hash: arg.text_hash,
         registered_at: task.registered_at,
         duration: task.duration,
+        voting_period: task.voting_period,
         state: crate::state_to_view(&task.state),
         votes: Vec::new(),
+        verdict_signature: None,
     };
     record.absorb(&task);
     crate::save_task(&record);
@@ -328,6 +337,36 @@ fn list_tasks(chain: String, streamer: ByteBuf) -> Vec<ByteBuf> {
 fn get_channel(chain: String, streamer: ByteBuf) -> Option<crate::ChannelRecord> {
     let spec = auth::spec_of(&chain).ok()?;
     Some(crate::load_channel(&chain, &streamer, spec.min_gross))
+}
+
+/// The verdict and its threshold signature, exactly what a claim
+/// transaction needs (game-spec §4: «кладёт подпись в query»). `None` until
+/// the task is decided; the signature follows within a sweep.
+#[ic_cdk::query]
+fn get_verdict(chain: String, task_id: ByteBuf) -> Option<Verdict> {
+    let record = crate::load_task(&crate::task_key(&chain, &task_id))?;
+    let crate::StateView::Decided { outcome } = record.state else {
+        return None;
+    };
+    Some(Verdict {
+        outcome,
+        signature: record.verdict_signature,
+    })
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct Verdict {
+    pub outcome: crate::OutcomeView,
+    pub signature: Option<ByteBuf>,
+}
+
+/// The RESOLVER birth field for escrows this canister resolves on `chain`:
+/// the tECDSA eth address on EVM, the Ed25519 pubkey on Solana. `None` until
+/// the timer warms the key cache after the first deploy.
+#[ic_cdk::query]
+fn get_resolver(chain: String) -> Option<ByteBuf> {
+    let spec = auth::spec_of(&chain).ok()?;
+    crate::sign::resolver_for(spec).map(ByteBuf::from)
 }
 
 #[ic_cdk::query]

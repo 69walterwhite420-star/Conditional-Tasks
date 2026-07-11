@@ -257,7 +257,7 @@ pub fn derive_task_id(
     }
 }
 
-fn abi_address(out: &mut Vec<u8>, address: &[u8]) -> Result<(), AuthError> {
+pub(crate) fn abi_address(out: &mut Vec<u8>, address: &[u8]) -> Result<(), AuthError> {
     if address.len() != 20 {
         return Err(AuthError::BadFieldLength);
     }
@@ -266,7 +266,7 @@ fn abi_address(out: &mut Vec<u8>, address: &[u8]) -> Result<(), AuthError> {
     Ok(())
 }
 
-fn abi_uint(out: &mut Vec<u8>, value: u64) {
+pub(crate) fn abi_uint(out: &mut Vec<u8>, value: u64) {
     out.extend([0u8; 24]);
     out.extend(value.to_be_bytes());
 }

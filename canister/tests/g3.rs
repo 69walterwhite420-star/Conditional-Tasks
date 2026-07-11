@@ -10,7 +10,6 @@ use candid::{Encode, Principal};
 use common::*;
 use conditional_tasks::api::VoteArg;
 use conditional_tasks::{ChoiceView, OutcomeView, StateView, auth};
-use conditional_tasks_logic as logic;
 use pocket_ic::PocketIc;
 use serde_bytes::ByteBuf;
 
@@ -120,7 +119,7 @@ fn majority_settles_and_the_tally_is_idempotent() {
     cast_vote(&pic, game, &task_id, &b, ChoiceView::Done).unwrap();
     cast_vote(&pic, game, &task_id, &c, ChoiceView::NotDone).unwrap();
 
-    pic.advance_time(std::time::Duration::from_secs(logic::VOTING_PERIOD + 90));
+    pic.advance_time(std::time::Duration::from_secs(VOTING_PERIOD + 90));
     pic.tick();
     pic.tick();
 
@@ -136,8 +135,17 @@ fn majority_settles_and_the_tally_is_idempotent() {
     assert_eq!(record.votes.len(), 3);
     verify_certified_task(&pic, game, EVM, &task);
 
-    // Further ticks change nothing: the verdict is written once.
-    let before = task.data.clone();
+    // The verdict is written once; the threshold signature appears once,
+    // soon after (G4). From then on the record is frozen forever.
+    let before = loop {
+        pic.advance_time(std::time::Duration::from_secs(31));
+        pic.tick();
+        pic.tick();
+        let task = fetch_task(&pic, game, EVM, &task_id);
+        if task_state(&task).verdict_signature.is_some() {
+            break task.data;
+        }
+    };
     pic.advance_time(std::time::Duration::from_secs(600));
     pic.tick();
     pic.tick();
@@ -174,7 +182,7 @@ fn tie_cancels() {
     cast_vote(&pic, game, &task_id, &a, ChoiceView::Done).unwrap();
     cast_vote(&pic, game, &task_id, &b, ChoiceView::NotDone).unwrap();
 
-    pic.advance_time(std::time::Duration::from_secs(logic::VOTING_PERIOD + 90));
+    pic.advance_time(std::time::Duration::from_secs(VOTING_PERIOD + 90));
     pic.tick();
     pic.tick();
 

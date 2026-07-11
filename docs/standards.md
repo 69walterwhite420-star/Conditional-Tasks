@@ -51,7 +51,7 @@
 
 Два профиля: `testnet`, `mainnet`. Смена среды = смена профиля, ноль изменений кода.
 
-Ровно ключи из game-spec §7: `crown_index`; per-chain — `id`, `factory`, `escrow_init_code_hash` (EVM), `evm_chain_id` (EVM), `domain` (Solana), `min_gross`. Всё.
+Ровно ключи из game-spec §7: `crown_index`, `threshold_key`, `voting_period`; per-chain — `id`, `factory`, `escrow_init_code_hash` (EVM), `evm_chain_id` (EVM), `domain` (Solana), `min_gross`. Всё.
 
 Нет и не появится: RPC-URL, API-ключ, адрес сплиттера, `feeBps`, казна, адреса кошельков, `duration`, `deadline` — последние два задаёт донор в каждом задании.
 

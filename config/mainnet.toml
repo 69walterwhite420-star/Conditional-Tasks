@@ -3,4 +3,7 @@
 # Те же ключи, что в testnet.toml (docs/game-spec.md §7).
 #
 # Заполняется на G5: сети из mainnet-профилей ядра и фабрики, principal
-# боевого crown-index. До готовности всей платформы здесь пусто.
+# боевого crown-index. До готовности всей платформы здесь только имя ключа.
+
+threshold_key = "key_1"
+voting_period = 3600

@@ -12,7 +12,7 @@
 | G1 | `logic` — чистая машина состояний | DONE |
 | G2 | Канистра: задания и подписи участников | DONE |
 | G3 | Голосование весом книги | DONE |
-| G4 | Вердикт: threshold-подпись + e2e через реальные сети | TODO |
+| G4 | Вердикт: threshold-подпись + e2e через реальные сети | DONE |
 | G5 | Заморозка и прод | DEFERRED |
 
 Статусы: `TODO` · `IN-PROGRESS` · `DONE` · `DEFERRED`.
@@ -48,7 +48,7 @@
 
 **Вход.** game-spec §3, §6.
 
-**Выход.** Крейт `conditional-tasks-logic`. В нём: `Task`, `State`, `Action`, `Vote`, `Verdict`, функция перехода `step(task, action, now) -> Result<...>`, подсчёт `verdict(votes)`, константы игры (`VOTING_PERIOD`, `MIN_DURATION`, `MAX_DURATION`, `DEADLINE_MARGIN`, `MIN_VOTE_WEIGHT`), `LOGIC_VERSION`. Время — аргумент. Адреса и ключи — непрозрачные байты.
+**Выход.** Крейт `conditional-tasks-logic`. В нём: `Task`, `State`, `Action`, `Vote`, `Verdict`, функция перехода `step(task, action, now) -> Result<...>`, подсчёт `verdict(votes)`, константы правил (`MIN_DURATION`, `MAX_DURATION`, `DEADLINE_MARGIN`, `MIN_VOTE_WEIGHT`), `LOGIC_VERSION`. Окно голосования — параметр рождения задания (профиль конфига), не константа. Время — аргумент. Адреса и ключи — непрозрачные байты.
 
 Заголовок `lib.rs`:
 ```rust

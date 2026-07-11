@@ -17,6 +17,9 @@ use sha3::Keccak256;
 pub const EVM: &str = "eth-sepolia";
 pub const SOL: &str = "solana-devnet";
 pub const DURATION: u64 = 3_600;
+/// Mirrors `voting_period` of config/testnet.toml — the profile the test
+/// wasm is baked with.
+pub const VOTING_PERIOD: u64 = 120;
 
 // ---- instances ----------------------------------------------------------------
 
@@ -30,18 +33,58 @@ fn game_wasm() -> Vec<u8> {
 
 fn new_instance() -> (PocketIc, Principal) {
     // The canister sits on the NNS subnet so its certificates carry no
-    // delegation and verify directly against the instance root key.
-    let pic = PocketIcBuilder::new().with_nns_subnet().build();
+    // delegation and verify directly against the instance root key; the II
+    // subnet provides the threshold keys.
+    let pic = PocketIcBuilder::new()
+        .with_nns_subnet()
+        .with_ii_subnet()
+        .build();
     let nns = pic.topology().get_nns().expect("nns subnet");
     let canister = pic.create_canister_on_subnet(None, None, nns);
     pic.add_cycles(canister, 10_000_000_000_000);
     (pic, canister)
 }
 
+/// Lets the first timer sweeps run so the threshold key cache is warm:
+/// registration refuses tasks until the canister knows its own resolver.
+pub fn warm_up(pic: &PocketIc, canister: Principal) {
+    for _ in 0..40 {
+        pic.advance_time(std::time::Duration::from_secs(1));
+        pic.tick();
+        let evm: (Option<ByteBuf>,) = query(
+            pic,
+            canister,
+            "get_resolver",
+            Encode!(&EVM.to_string()).unwrap(),
+        );
+        let sol: (Option<ByteBuf>,) = query(
+            pic,
+            canister,
+            "get_resolver",
+            Encode!(&SOL.to_string()).unwrap(),
+        );
+        if evm.0.is_some() && sol.0.is_some() {
+            return;
+        }
+    }
+    panic!("resolver keys never warmed up");
+}
+
+pub fn resolver(pic: &PocketIc, canister: Principal, chain: &str) -> Vec<u8> {
+    let (resolver,): (Option<ByteBuf>,) = query(
+        pic,
+        canister,
+        "get_resolver",
+        Encode!(&chain.to_string()).unwrap(),
+    );
+    resolver.expect("resolver key ready").into_vec()
+}
+
 /// A game canister with no book behind it (G2 surface).
 pub fn setup() -> (PocketIc, Principal) {
     let (pic, canister) = new_instance();
     pic.install_canister(canister, game_wasm(), Encode!().unwrap(), None);
+    warm_up(&pic, canister);
     (pic, canister)
 }
 
@@ -62,6 +105,7 @@ pub fn setup_with_index() -> (PocketIc, Principal, Principal) {
         crown_index: Some(index),
     };
     pic.install_canister(game, game_wasm(), Encode!(&Some(overrides)).unwrap(), None);
+    warm_up(&pic, game);
     (pic, game, index)
 }
 
@@ -177,8 +221,8 @@ pub fn register_evm(
     let spec = auth::spec_of(EVM).unwrap();
     let now = now_seconds(pic);
     let gross = 1_000_000;
-    let deadline = now + DURATION + logic::VOTING_PERIOD + logic::DEADLINE_MARGIN + 60;
-    let resolver = [0x77u8; 20];
+    let deadline = now + DURATION + VOTING_PERIOD + logic::DEADLINE_MARGIN + 60;
+    let resolver = resolver(pic, canister, EVM);
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,

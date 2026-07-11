@@ -34,6 +34,10 @@ fn main() {
     // Top-level crown_index principal; the part before the first [[chain]].
     let head = toml.split("[[chain]]").next().unwrap_or_default();
     let crown_index = value_of_opt(head, "crown_index").unwrap_or_default();
+    let threshold_key = value_of_opt(head, "threshold_key")
+        .unwrap_or_else(|| panic!("config/{profile}.toml: no threshold_key"));
+    let voting_period = value_of_opt(head, "voting_period")
+        .unwrap_or_else(|| panic!("config/{profile}.toml: no voting_period"));
 
     let mut chains = String::new();
     for block in toml.split("[[chain]]").skip(1) {
@@ -61,6 +65,10 @@ fn main() {
              pub const PROFILE: &str = {profile:?};\n\
              /// The book canister; empty until a real deploy pins it.\n\
              pub const CROWN_INDEX: &str = {crown_index:?};\n\
+             /// Threshold key name of this environment.\n\
+             pub const THRESHOLD_KEY: &str = {threshold_key:?};\n\
+             /// Voting window in seconds; the prod value lives in mainnet.toml.\n\
+             pub const VOTING_PERIOD: u64 = {voting_period};\n\
              /// Chain table from config/{profile}.toml.\n\
              pub const CHAINS: &[ChainSpec] = &[\n{chains}];\n"
         ),

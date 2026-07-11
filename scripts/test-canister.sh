@@ -18,4 +18,4 @@ fi
     exit 1
 }
 
-cargo test -p conditional-tasks --test g2 --test g3 -- --include-ignored
+cargo test -p conditional-tasks --test g2 --test g3 --test g4 -- --include-ignored

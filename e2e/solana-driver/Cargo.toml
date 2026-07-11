@@ -1,0 +1,18 @@
+# Devnet chain driver for the e2e (scripts/e2e-testnets.sh). Not a workspace
+# member: it exists only to send the transactions the game itself never sends —
+# donate, createEscrow, claim with the canister's signature, refund.
+[package]
+name = "e2e-solana"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+factory = { path = "../../../../Crown-Factory/shapes/two-outcome/solana/programs/factory", features = ["no-entrypoint"] }
+splitter = { path = "../../../../Crown-Core/contracts/solana/programs/splitter", features = ["no-entrypoint"] }
+anchor-lang = "0.31.1"
+anchor-spl = "0.31.1"
+solana-rpc-client = "2.1"
+solana-sdk = "2.1"
+hex = "0.4"
+
+[workspace]

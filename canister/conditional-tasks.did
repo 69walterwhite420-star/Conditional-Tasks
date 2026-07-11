@@ -23,8 +23,10 @@ type Task = record {
   text_hash : blob;
   registered_at : nat64;
   duration : nat64;
+  voting_period : nat64;
   state : State;
   votes : vec Vote;
+  verdict_signature : opt blob;
 };
 type Channel = record {
   min_gross : nat64;
@@ -36,6 +38,10 @@ type CertifiedTask = record {
   data : blob;
   certificate : opt blob;
   witness : blob;
+};
+type Verdict = record {
+  outcome : Outcome;
+  signature : opt blob;
 };
 type RegisterArg = record {
   chain : text;
@@ -72,8 +78,11 @@ type ChannelArg = record {
 };
 type RegisterResult = variant { Ok : blob; Err : text };
 type ActionResult = variant { Ok; Err : text };
+// Local-testing overrides; a mainnet-profile build traps on them.
+type Overrides = record { crown_index : opt principal };
 
-service : {
+service : (opt Overrides) -> {
+
   register_task : (RegisterArg) -> (RegisterResult);
   accept : (ActionArg) -> (ActionResult);
   decline : (ActionArg) -> (ActionResult);
@@ -83,5 +92,7 @@ service : {
   get_task : (text, blob) -> (opt CertifiedTask) query;
   list_tasks : (text, blob) -> (vec blob) query;
   get_channel : (text, blob) -> (opt Channel) query;
+  get_resolver : (text) -> (opt blob) query;
+  get_verdict : (text, blob) -> (opt Verdict) query;
   get_logic_version : () -> (nat32) query;
 }

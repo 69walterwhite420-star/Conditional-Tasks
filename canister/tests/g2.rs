@@ -152,8 +152,8 @@ fn registration_validation_and_duplicates() {
     // Deadline below registration + duration + voting + margin.
     let spec = auth::spec_of(EVM).unwrap();
     let now = now_seconds(&pic);
-    let tight = now + DURATION + logic::VOTING_PERIOD + logic::DEADLINE_MARGIN - 10;
-    let resolver = [0x77u8; 20];
+    let tight = now + DURATION + VOTING_PERIOD + logic::DEADLINE_MARGIN - 10;
+    let resolver: [u8; 20] = resolver(&pic, canister, EVM).try_into().unwrap();
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,
@@ -198,8 +198,8 @@ fn tampered_registration_fields_break_the_signature() {
     let spec = auth::spec_of(EVM).unwrap();
     let now = now_seconds(&pic);
     let gross = 1_000_000;
-    let deadline = now + DURATION + logic::VOTING_PERIOD + logic::DEADLINE_MARGIN + 60;
-    let resolver = [0x77u8; 20];
+    let deadline = now + DURATION + VOTING_PERIOD + logic::DEADLINE_MARGIN + 60;
+    let resolver: [u8; 20] = resolver(&pic, canister, EVM).try_into().unwrap();
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,
@@ -306,7 +306,7 @@ fn empty_voting_cancels_by_timer() {
     )
     .unwrap();
 
-    pic.advance_time(std::time::Duration::from_secs(logic::VOTING_PERIOD + 90));
+    pic.advance_time(std::time::Duration::from_secs(VOTING_PERIOD + 90));
     pic.tick();
     pic.tick();
 
@@ -430,12 +430,12 @@ fn solana_flow_mirrors_evm() {
     let (pic, canister) = setup();
     let donor = sol_wallet(1);
     let streamer = sol_wallet(2);
-    let resolver = [0x77u8; 32];
+    let resolver: [u8; 32] = resolver(&pic, canister, SOL).try_into().unwrap();
 
     let spec = auth::spec_of(SOL).unwrap();
     let now = now_seconds(&pic);
     let gross = 1_000_000;
-    let deadline = now + DURATION + logic::VOTING_PERIOD + logic::DEADLINE_MARGIN + 60;
+    let deadline = now + DURATION + VOTING_PERIOD + logic::DEADLINE_MARGIN + 60;
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,
