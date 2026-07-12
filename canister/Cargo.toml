@@ -18,8 +18,6 @@ serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 serde_cbor = "0.11"
 sha2 = "0.10"
-sha3 = "0.10"
-k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
 bs58 = "0.5"
 

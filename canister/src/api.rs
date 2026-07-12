@@ -80,7 +80,7 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
     }
     // The escrow must name this canister's key: a task no verdict can ever
     // unlock is not a task.
-    let resolver = crate::sign::resolver_for(spec).ok_or("resolver key not ready")?;
+    let resolver = crate::sign::resolver().ok_or("resolver key not ready")?;
     if arg.resolver.as_slice() != resolver.as_slice() {
         return Err("resolver is not this canister's key".to_string());
     }
@@ -92,7 +92,7 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
         auth::ACTION_REGISTER,
         &auth::register_payload(&arg.text_hash, arg.duration),
     );
-    auth::verify_wallet_signature(spec.kind(), &message, &arg.signature, &arg.donor)
+    auth::verify_wallet_signature(&message, &arg.signature, &arg.donor)
         .map_err(|e| e.text().to_string())?;
 
     let channel = crate::load_channel(&arg.chain, &arg.streamer, spec.min_gross);
@@ -183,7 +183,6 @@ pub struct VoteArg {
 /// the voting window may have closed while the book was answering.
 #[ic_cdk::update]
 async fn vote(arg: VoteArg) -> Result<(), String> {
-    let spec = auth::spec_of(&arg.chain).map_err(|e| e.text().to_string())?;
     let key = crate::task_key(&arg.chain, &arg.task_id);
     let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
 
@@ -201,7 +200,7 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
         auth::ACTION_VOTE,
         &[choice_byte],
     );
-    auth::verify_wallet_signature(spec.kind(), &message, &arg.signature, &arg.voter)
+    auth::verify_wallet_signature(&message, &arg.signature, &arg.voter)
         .map_err(|e| e.text().to_string())?;
 
     // Time first, persisted: a late timer never extends the window.
@@ -244,12 +243,11 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
 /// signature over (task, action), step the machine. Time transitions that
 /// became due persist even when the action itself is rejected.
 fn streamer_action(arg: ActionArg, action: logic::Action, action_byte: u8) -> Result<(), String> {
-    let spec = auth::spec_of(&arg.chain).map_err(|e| e.text().to_string())?;
     let key = crate::task_key(&arg.chain, &arg.task_id);
     let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
 
     let message = auth::task_message(&arg.chain, &canister_id(), &arg.task_id, action_byte, &[]);
-    auth::verify_wallet_signature(spec.kind(), &message, &arg.signature, &record.streamer)
+    auth::verify_wallet_signature(&message, &arg.signature, &record.streamer)
         .map_err(|e| e.text().to_string())?;
 
     let mut task = record.to_logic();
@@ -291,7 +289,7 @@ fn set_channel_params(arg: ChannelArg) -> Result<(), String> {
         arg.enabled,
         arg.counter,
     );
-    auth::verify_wallet_signature(spec.kind(), &message, &arg.signature, &arg.streamer)
+    auth::verify_wallet_signature(&message, &arg.signature, &arg.streamer)
         .map_err(|e| e.text().to_string())?;
     crate::save_channel(
         &arg.chain,
@@ -364,12 +362,12 @@ pub struct Verdict {
 }
 
 /// The RESOLVER birth field for escrows this canister resolves on `chain`:
-/// the tECDSA eth address on EVM, the Ed25519 pubkey on Solana. `None` until
-/// the timer warms the key cache after the first deploy.
+/// the Ed25519 pubkey of its threshold key. `None` until the timer warms the
+/// key cache after the first deploy.
 #[ic_cdk::query]
 fn get_resolver(chain: String) -> Option<ByteBuf> {
-    let spec = auth::spec_of(&chain).ok()?;
-    crate::sign::resolver_for(spec).map(ByteBuf::from)
+    auth::spec_of(&chain).ok()?;
+    crate::sign::resolver().map(ByteBuf::from)
 }
 
 #[ic_cdk::query]

@@ -43,16 +43,12 @@ fn main() {
     for block in toml.split("[[chain]]").skip(1) {
         let context = format!("config/{profile}.toml");
         let get = |key: &str| value_of(block, key, &context);
-        let opt = |key: &str| value_of_opt(block, key).unwrap_or_default();
         chains.push_str(&format!(
             "    ChainSpec {{ id: {id:?}, factory: {factory:?}, \
-             escrow_init_code_hash: {hash:?}, evm_chain_id: {chain_id}, \
              domain: {domain:?}, min_gross: {min_gross} }},\n",
             id = get("id"),
             factory = get("factory"),
-            hash = opt("escrow_init_code_hash"),
-            chain_id = value_of_opt(block, "evm_chain_id").unwrap_or_else(|| "0".to_string()),
-            domain = opt("domain"),
+            domain = get("domain"),
             min_gross = get("min_gross"),
         ));
     }

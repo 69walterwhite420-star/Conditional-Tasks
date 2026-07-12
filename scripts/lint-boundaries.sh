@@ -17,8 +17,8 @@ if grep -rEn 'ic_cdk|std::(fs|net|time)|reqwest' logic/src/; then
     exit 1
 fi
 
-# 3. logic knows nothing about chains or cryptography.
-if grep -riEn 'evm|solana|keccak|secp256k1|ed25519|candid' logic/src/; then
+# 3. logic knows nothing about the chain or cryptography.
+if grep -riEn 'solana|ed25519|sha256|candid' logic/src/; then
     echo "FAIL: chain or crypto reference in logic/src" >&2
     exit 1
 fi

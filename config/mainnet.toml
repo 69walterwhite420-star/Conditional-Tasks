@@ -2,8 +2,8 @@
 #
 # Те же ключи, что в testnet.toml (docs/game-spec.md §7).
 #
-# Заполняется на G5: сети из mainnet-профилей ядра и фабрики, principal
-# боевого crown-index. До готовности всей платформы здесь только имя ключа.
+# Заполняется на G5: solana-mainnet из mainnet-профилей ядра и фабрики,
+# principal боевого crown-index. До готовности платформы здесь только ключ.
 
 threshold_key = "key_1"
 voting_period = 3600

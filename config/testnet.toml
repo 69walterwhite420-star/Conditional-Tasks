@@ -2,10 +2,9 @@
 #
 # Ключи ровно по docs/game-spec.md §7:
 #   crown_index — principal книги (вес голосов и min_reputation)
-#   per-chain: id, factory, escrow_init_code_hash (EVM), evm_chain_id (EVM),
-#              domain (Solana), min_gross
+#   per-chain: id, factory, domain, min_gross
 #
-# factory / escrow_init_code_hash / min_gross копируются из
+# factory / domain / min_gross копируются из
 # crown-factory/deploy/testnet.toml; этот репозиторий их не порождает.
 # crown_index — локальная канистра: principal зависит от деплоя и
 # подставляется через init-оверрайд (на mainnet-профиле оверрайды трапаются).
@@ -13,16 +12,9 @@
 # PocketIC дают то же имя, что прод: key_1.
 
 threshold_key = "key_1"
-# Сжатые часы тестовых сетей: голосование 2 минуты. Прод-значение — час,
+# Сжатые часы devnet: голосование 2 минуты. Прод-значение — час,
 # в mainnet.toml; задание несёт свой период с рождения.
 voting_period = 120
-
-[[chain]]
-id                    = "eth-sepolia"
-factory               = "0xb3e280657477c9effed7f02ff7233faa9ccc6258"
-escrow_init_code_hash = "0x5415a5314b9bebe5a6fe092fff7737865b86b2eb8538af8a25ae567781c02951"
-evm_chain_id          = 11155111
-min_gross             = 34
 
 [[chain]]
 id        = "solana-devnet"

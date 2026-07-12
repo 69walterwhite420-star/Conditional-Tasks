@@ -1,5 +1,5 @@
 //! Shared harness of the PocketIC integration tests: instance setup, wallet
-//! signing (independent re-implementations of the wallet side), task flows
+//! signing (an independent re-implementation of the wallet side), task flows
 //! and full offchain certificate verification.
 
 #![allow(dead_code)] // each test binary uses its own subset
@@ -12,10 +12,8 @@ use ic_certification::{Certificate, HashTree, LookupResult};
 use pocket_ic::{PocketIc, PocketIcBuilder};
 use serde_bytes::ByteBuf;
 use sha2::{Digest, Sha256};
-use sha3::Keccak256;
 
-pub const EVM: &str = "eth-sepolia";
-pub const SOL: &str = "solana-devnet";
+pub const CHAIN: &str = "solana-devnet";
 pub const DURATION: u64 = 3_600;
 /// Mirrors `voting_period` of config/testnet.toml — the profile the test
 /// wasm is baked with.
@@ -51,31 +49,25 @@ pub fn warm_up(pic: &PocketIc, canister: Principal) {
     for _ in 0..40 {
         pic.advance_time(std::time::Duration::from_secs(1));
         pic.tick();
-        let evm: (Option<ByteBuf>,) = query(
+        let key: (Option<ByteBuf>,) = query(
             pic,
             canister,
             "get_resolver",
-            Encode!(&EVM.to_string()).unwrap(),
+            Encode!(&CHAIN.to_string()).unwrap(),
         );
-        let sol: (Option<ByteBuf>,) = query(
-            pic,
-            canister,
-            "get_resolver",
-            Encode!(&SOL.to_string()).unwrap(),
-        );
-        if evm.0.is_some() && sol.0.is_some() {
+        if key.0.is_some() {
             return;
         }
     }
-    panic!("resolver keys never warmed up");
+    panic!("resolver key never warmed up");
 }
 
-pub fn resolver(pic: &PocketIc, canister: Principal, chain: &str) -> Vec<u8> {
+pub fn resolver(pic: &PocketIc, canister: Principal) -> Vec<u8> {
     let (resolver,): (Option<ByteBuf>,) = query(
         pic,
         canister,
         "get_resolver",
-        Encode!(&chain.to_string()).unwrap(),
+        Encode!(&CHAIN.to_string()).unwrap(),
     );
     resolver.expect("resolver key ready").into_vec()
 }
@@ -112,13 +104,12 @@ pub fn setup_with_index() -> (PocketIc, Principal, Principal) {
 pub fn seed_reputation(
     pic: &PocketIc,
     index: Principal,
-    chain: &str,
     wallet: &[u8],
     streamer: &[u8],
     value: u128,
 ) {
     let arg = Encode!(
-        &chain.to_string(),
+        &CHAIN.to_string(),
         &ByteBuf::from(wallet.to_vec()),
         &ByteBuf::from(streamer.to_vec()),
         &value
@@ -158,48 +149,20 @@ pub fn query<R: for<'a> candid::utils::ArgumentDecoder<'a>>(
 
 // ---- wallets ------------------------------------------------------------------
 
-pub struct EvmWallet {
-    pub key: k256::ecdsa::SigningKey,
-    pub address: Vec<u8>,
-}
-
-pub fn evm_wallet(seed: u8) -> EvmWallet {
-    let key = k256::ecdsa::SigningKey::from_slice(&[seed; 32]).unwrap();
-    // Independent re-derivation of the address (the protocol pin lives in
-    // auth's unit tests; here we just need matching keys).
-    let point = key.verifying_key().to_encoded_point(false);
-    let digest: [u8; 32] = Keccak256::digest(&point.as_bytes()[1..]).into();
-    EvmWallet {
-        key,
-        address: digest[12..].to_vec(),
-    }
-}
-
-/// EIP-191 personal_sign, re-implemented independently of auth.rs.
-pub fn evm_sign(wallet: &EvmWallet, message: &[u8]) -> Vec<u8> {
-    let mut hasher = Keccak256::new();
-    hasher.update(b"\x19Ethereum Signed Message:\n");
-    hasher.update(message.len().to_string().as_bytes());
-    hasher.update(message);
-    let digest: [u8; 32] = hasher.finalize().into();
-    let (sig, recovery) = wallet.key.sign_prehash_recoverable(&digest).unwrap();
-    let mut out = sig.to_bytes().to_vec();
-    out.push(27 + recovery.to_byte());
-    out
-}
-
-pub struct SolWallet {
+pub struct Wallet {
     pub key: ed25519_dalek::SigningKey,
     pub address: Vec<u8>,
 }
 
-pub fn sol_wallet(seed: u8) -> SolWallet {
+pub fn wallet(seed: u8) -> Wallet {
     let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
     let address = key.verifying_key().to_bytes().to_vec();
-    SolWallet { key, address }
+    Wallet { key, address }
 }
 
-pub fn sol_sign(wallet: &SolWallet, message: &[u8]) -> Vec<u8> {
+/// Raw Ed25519 over the protocol message, re-implemented independently of
+/// auth.rs.
+pub fn sign(wallet: &Wallet, message: &[u8]) -> Vec<u8> {
     use ed25519_dalek::Signer;
     wallet.key.sign(message).to_bytes().to_vec()
 }
@@ -211,18 +174,18 @@ pub struct Registered {
     pub task_id: Vec<u8>,
 }
 
-pub fn register_evm(
+pub fn register(
     pic: &PocketIc,
     canister: Principal,
-    donor: &EvmWallet,
+    donor: &Wallet,
     streamer: &[u8],
     nonce: u64,
 ) -> Result<Registered, String> {
-    let spec = auth::spec_of(EVM).unwrap();
+    let spec = auth::spec_of(CHAIN).unwrap();
     let now = now_seconds(pic);
     let gross = 1_000_000;
     let deadline = now + DURATION + VOTING_PERIOD + logic::DEADLINE_MARGIN + 60;
-    let resolver = resolver(pic, canister, EVM);
+    let resolver = resolver(pic, canister);
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,
@@ -235,14 +198,14 @@ pub fn register_evm(
     .unwrap();
     let text_hash = Sha256::digest(b"do a backflip \x00 salt").to_vec();
     let message = auth::task_message(
-        EVM,
+        CHAIN,
         canister.as_slice(),
         &task_id,
         auth::ACTION_REGISTER,
         &auth::register_payload(&text_hash, DURATION),
     );
     let arg = RegisterArg {
-        chain: EVM.to_string(),
+        chain: CHAIN.to_string(),
         donor: ByteBuf::from(donor.address.clone()),
         streamer: ByteBuf::from(streamer.to_vec()),
         gross,
@@ -251,7 +214,7 @@ pub fn register_evm(
         nonce,
         duration: DURATION,
         text_hash: ByteBuf::from(text_hash),
-        signature: ByteBuf::from(evm_sign(donor, &message)),
+        signature: ByteBuf::from(sign(donor, &message)),
     };
     let (result,): (Result<ByteBuf, String>,) =
         update(pic, canister, "register_task", Encode!(&arg).unwrap());
@@ -267,29 +230,24 @@ pub fn streamer_call(
     method: &str,
     action_byte: u8,
     task_id: &[u8],
-    signer: &EvmWallet,
+    signer: &Wallet,
 ) -> Result<(), String> {
-    let message = auth::task_message(EVM, canister.as_slice(), task_id, action_byte, &[]);
+    let message = auth::task_message(CHAIN, canister.as_slice(), task_id, action_byte, &[]);
     let arg = ActionArg {
-        chain: EVM.to_string(),
+        chain: CHAIN.to_string(),
         task_id: ByteBuf::from(task_id.to_vec()),
-        signature: ByteBuf::from(evm_sign(signer, &message)),
+        signature: ByteBuf::from(sign(signer, &message)),
     };
     let (result,): (Result<(), String>,) = update(pic, canister, method, Encode!(&arg).unwrap());
     result
 }
 
-pub fn fetch_task(
-    pic: &PocketIc,
-    canister: Principal,
-    chain: &str,
-    task_id: &[u8],
-) -> CertifiedTask {
+pub fn fetch_task(pic: &PocketIc, canister: Principal, task_id: &[u8]) -> CertifiedTask {
     let (task,): (Option<CertifiedTask>,) = query(
         pic,
         canister,
         "get_task",
-        Encode!(&chain.to_string(), &ByteBuf::from(task_id.to_vec())).unwrap(),
+        Encode!(&CHAIN.to_string(), &ByteBuf::from(task_id.to_vec())).unwrap(),
     );
     task.expect("task exists")
 }
@@ -302,12 +260,7 @@ pub fn task_state(task: &CertifiedTask) -> TaskRecord {
 
 /// Full offchain verification: BLS against the instance root key, the
 /// certified_data binding, the witness path down to sha256(record bytes).
-pub fn verify_certified_task(
-    pic: &PocketIc,
-    canister: Principal,
-    chain: &str,
-    task: &CertifiedTask,
-) {
+pub fn verify_certified_task(pic: &PocketIc, canister: Principal, task: &CertifiedTask) {
     let certificate: Certificate =
         serde_cbor::from_slice(task.certificate.as_ref().expect("certificate present"))
             .expect("certificate decodes");
@@ -344,7 +297,7 @@ pub fn verify_certified_task(
         "witness root == certified_data"
     );
     let record = task_state(task);
-    let key = task_key(chain, &record.task_id);
+    let key = task_key(CHAIN, &record.task_id);
     let LookupResult::Found(leaf) = witness.lookup_path([b"tasks".as_slice(), &key]) else {
         panic!("task key not witnessed");
     };

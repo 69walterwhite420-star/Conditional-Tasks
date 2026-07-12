@@ -1,6 +1,6 @@
 //! G3 integration: voting weighted by the book (docs/build-plan.md G3).
 //! The book is a mock crown-index behind the init override; the real book
-//! is exercised by the G4 e2e against the test networks.
+//! is exercised by the e2e against live devnet.
 //!
 //! Driven by scripts/test-canister.sh, hence the #[ignore] markers.
 
@@ -17,11 +17,11 @@ use serde_bytes::ByteBuf;
 fn task_in_voting(
     pic: &PocketIc,
     game: Principal,
-    donor: &EvmWallet,
-    streamer: &EvmWallet,
+    donor: &Wallet,
+    streamer: &Wallet,
     nonce: u64,
 ) -> Vec<u8> {
-    let r = register_evm(pic, game, donor, &streamer.address, nonce).unwrap();
+    let r = register(pic, game, donor, &streamer.address, nonce).unwrap();
     streamer_call(
         pic,
         game,
@@ -39,7 +39,7 @@ fn cast_vote(
     pic: &PocketIc,
     game: Principal,
     task_id: &[u8],
-    voter: &EvmWallet,
+    voter: &Wallet,
     choice: ChoiceView,
 ) -> Result<(), String> {
     let choice_byte = match choice {
@@ -47,18 +47,18 @@ fn cast_vote(
         ChoiceView::NotDone => auth::CHOICE_NOT_DONE,
     };
     let message = auth::task_message(
-        EVM,
+        CHAIN,
         game.as_slice(),
         task_id,
         auth::ACTION_VOTE,
         &[choice_byte],
     );
     let arg = VoteArg {
-        chain: EVM.to_string(),
+        chain: CHAIN.to_string(),
         task_id: ByteBuf::from(task_id.to_vec()),
         voter: ByteBuf::from(voter.address.clone()),
         choice,
-        signature: ByteBuf::from(evm_sign(voter, &message)),
+        signature: ByteBuf::from(sign(voter, &message)),
     };
     let (result,): (Result<(), String>,) = update(pic, game, "vote", Encode!(&arg).unwrap());
     result
@@ -68,23 +68,16 @@ fn cast_vote(
 #[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
 fn vote_weight_comes_from_the_book() {
     let (pic, game, index) = setup_with_index();
-    let donor = evm_wallet(1);
-    let streamer = evm_wallet(2);
-    let rich = evm_wallet(3);
-    let poor = evm_wallet(4);
+    let donor = wallet(1);
+    let streamer = wallet(2);
+    let rich = wallet(3);
+    let poor = wallet(4);
 
-    seed_reputation(
-        &pic,
-        index,
-        EVM,
-        &rich.address,
-        &streamer.address,
-        5_000_000,
-    );
+    seed_reputation(&pic, index, &rich.address, &streamer.address, 5_000_000);
     let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
 
     cast_vote(&pic, game, &task_id, &rich, ChoiceView::Done).unwrap();
-    let record = task_state(&fetch_task(&pic, game, EVM, &task_id));
+    let record = task_state(&fetch_task(&pic, game, &task_id));
     assert_eq!(record.votes.len(), 1);
     assert_eq!(record.votes[0].voter.as_slice(), rich.address.as_slice());
     assert_eq!(record.votes[0].weight, 5_000_000);
@@ -96,7 +89,7 @@ fn vote_weight_comes_from_the_book() {
     // One address, one vote, forever.
     let error = cast_vote(&pic, game, &task_id, &rich, ChoiceView::NotDone).unwrap_err();
     assert_eq!(error, "duplicate voter");
-    let record = task_state(&fetch_task(&pic, game, EVM, &task_id));
+    let record = task_state(&fetch_task(&pic, game, &task_id));
     assert_eq!(record.votes.len(), 1);
 }
 
@@ -104,15 +97,15 @@ fn vote_weight_comes_from_the_book() {
 #[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
 fn majority_settles_and_the_tally_is_idempotent() {
     let (pic, game, index) = setup_with_index();
-    let donor = evm_wallet(1);
-    let streamer = evm_wallet(2);
-    let a = evm_wallet(3);
-    let b = evm_wallet(4);
-    let c = evm_wallet(5);
+    let donor = wallet(1);
+    let streamer = wallet(2);
+    let a = wallet(3);
+    let b = wallet(4);
+    let c = wallet(5);
 
-    seed_reputation(&pic, index, EVM, &a.address, &streamer.address, 5_000_000);
-    seed_reputation(&pic, index, EVM, &b.address, &streamer.address, 1_000_000);
-    seed_reputation(&pic, index, EVM, &c.address, &streamer.address, 5_900_000);
+    seed_reputation(&pic, index, &a.address, &streamer.address, 5_000_000);
+    seed_reputation(&pic, index, &b.address, &streamer.address, 1_000_000);
+    seed_reputation(&pic, index, &c.address, &streamer.address, 5_900_000);
 
     let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
     cast_vote(&pic, game, &task_id, &a, ChoiceView::Done).unwrap();
@@ -124,7 +117,7 @@ fn majority_settles_and_the_tally_is_idempotent() {
     pic.tick();
 
     // 6.0M done > 5.9M not done: strict majority settles.
-    let task = fetch_task(&pic, game, EVM, &task_id);
+    let task = fetch_task(&pic, game, &task_id);
     let record = task_state(&task);
     assert_eq!(
         record.state,
@@ -133,7 +126,7 @@ fn majority_settles_and_the_tally_is_idempotent() {
         }
     );
     assert_eq!(record.votes.len(), 3);
-    verify_certified_task(&pic, game, EVM, &task);
+    verify_certified_task(&pic, game, &task);
 
     // The verdict is written once; the threshold signature appears once,
     // soon after (G4). From then on the record is frozen forever.
@@ -141,7 +134,7 @@ fn majority_settles_and_the_tally_is_idempotent() {
         pic.advance_time(std::time::Duration::from_secs(31));
         pic.tick();
         pic.tick();
-        let task = fetch_task(&pic, game, EVM, &task_id);
+        let task = fetch_task(&pic, game, &task_id);
         if task_state(&task).verdict_signature.is_some() {
             break task.data;
         }
@@ -149,19 +142,12 @@ fn majority_settles_and_the_tally_is_idempotent() {
     pic.advance_time(std::time::Duration::from_secs(600));
     pic.tick();
     pic.tick();
-    let after = fetch_task(&pic, game, EVM, &task_id);
+    let after = fetch_task(&pic, game, &task_id);
     assert_eq!(before, after.data);
 
     // Late votes bounce off the decided task.
-    let late = evm_wallet(6);
-    seed_reputation(
-        &pic,
-        index,
-        EVM,
-        &late.address,
-        &streamer.address,
-        9_000_000,
-    );
+    let late = wallet(6);
+    seed_reputation(&pic, index, &late.address, &streamer.address, 9_000_000);
     let error = cast_vote(&pic, game, &task_id, &late, ChoiceView::NotDone).unwrap_err();
     assert_eq!(error, "invalid transition");
 }
@@ -170,13 +156,13 @@ fn majority_settles_and_the_tally_is_idempotent() {
 #[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
 fn tie_cancels() {
     let (pic, game, index) = setup_with_index();
-    let donor = evm_wallet(1);
-    let streamer = evm_wallet(2);
-    let a = evm_wallet(3);
-    let b = evm_wallet(4);
+    let donor = wallet(1);
+    let streamer = wallet(2);
+    let a = wallet(3);
+    let b = wallet(4);
 
-    seed_reputation(&pic, index, EVM, &a.address, &streamer.address, 1_000_000);
-    seed_reputation(&pic, index, EVM, &b.address, &streamer.address, 1_000_000);
+    seed_reputation(&pic, index, &a.address, &streamer.address, 1_000_000);
+    seed_reputation(&pic, index, &b.address, &streamer.address, 1_000_000);
 
     let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
     cast_vote(&pic, game, &task_id, &a, ChoiceView::Done).unwrap();
@@ -186,7 +172,7 @@ fn tie_cancels() {
     pic.tick();
     pic.tick();
 
-    let record = task_state(&fetch_task(&pic, game, EVM, &task_id));
+    let record = task_state(&fetch_task(&pic, game, &task_id));
     assert_eq!(
         record.state,
         StateView::Decided {
@@ -199,58 +185,27 @@ fn tie_cancels() {
 #[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
 fn votes_outside_the_voting_window_are_rejected() {
     let (pic, game, index) = setup_with_index();
-    let donor = evm_wallet(1);
-    let streamer = evm_wallet(2);
-    let voter = evm_wallet(3);
-    seed_reputation(
-        &pic,
-        index,
-        EVM,
-        &voter.address,
-        &streamer.address,
-        5_000_000,
-    );
+    let donor = wallet(1);
+    let streamer = wallet(2);
+    let voter = wallet(3);
+    seed_reputation(&pic, index, &voter.address, &streamer.address, 5_000_000);
 
     // CREATED: no voting yet.
-    let r = register_evm(&pic, game, &donor, &streamer.address, 1).unwrap();
+    let r = register(&pic, game, &donor, &streamer.address, 1).unwrap();
     let error = cast_vote(&pic, game, &r.task_id, &voter, ChoiceView::Done).unwrap_err();
     assert_eq!(error, "invalid transition");
 }
 
 #[test]
 #[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
-fn reputation_is_chain_local() {
-    let (pic, game, index) = setup_with_index();
-    let donor = evm_wallet(1);
-    let streamer = evm_wallet(2);
-    let voter = evm_wallet(3);
-
-    // Reputation on another chain gives no voice here: the weight lookup is
-    // keyed by the task's chain, and the book is chain-local.
-    seed_reputation(
-        &pic,
-        index,
-        SOL,
-        &voter.address,
-        &streamer.address,
-        9_000_000,
-    );
-
-    let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
-    let error = cast_vote(&pic, game, &task_id, &voter, ChoiceView::Done).unwrap_err();
-    assert_eq!(error, "vote weight below threshold");
-}
-
-#[test]
-#[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
 fn min_reputation_gates_registration() {
     let (pic, game, index) = setup_with_index();
-    let donor = evm_wallet(1);
-    let streamer = evm_wallet(2);
+    let donor = wallet(1);
+    let streamer = wallet(2);
 
     // The streamer demands reputation from donors.
     let message = auth::channel_message(
-        EVM,
+        CHAIN,
         game.as_slice(),
         &streamer.address,
         34,
@@ -259,32 +214,25 @@ fn min_reputation_gates_registration() {
         1,
     );
     let arg = conditional_tasks::api::ChannelArg {
-        chain: EVM.to_string(),
+        chain: CHAIN.to_string(),
         streamer: ByteBuf::from(streamer.address.clone()),
         min_gross: 34,
         min_reputation: 1_000_000,
         enabled: true,
         counter: 1,
-        signature: ByteBuf::from(evm_sign(&streamer, &message)),
+        signature: ByteBuf::from(sign(&streamer, &message)),
     };
     let (result,): (Result<(), String>,) =
         update(&pic, game, "set_channel_params", Encode!(&arg).unwrap());
     result.unwrap();
 
     // An unknown donor is below the bar.
-    let error = register_evm(&pic, game, &donor, &streamer.address, 1).unwrap_err();
+    let error = register(&pic, game, &donor, &streamer.address, 1).unwrap_err();
     assert_eq!(error, "donor reputation below the channel minimum");
 
     // A donor with book history passes.
-    seed_reputation(
-        &pic,
-        index,
-        EVM,
-        &donor.address,
-        &streamer.address,
-        2_000_000,
-    );
-    register_evm(&pic, game, &donor, &streamer.address, 1).unwrap();
+    seed_reputation(&pic, index, &donor.address, &streamer.address, 2_000_000);
+    register(&pic, game, &donor, &streamer.address, 1).unwrap();
 }
 
 #[test]
@@ -293,13 +241,13 @@ fn unconfigured_book_fails_votes_cleanly() {
     // A game with no crown-index anywhere: registration without a reputation
     // demand works (no book call), voting errors and records nothing.
     let (pic, game) = setup();
-    let donor = evm_wallet(1);
-    let streamer = evm_wallet(2);
-    let voter = evm_wallet(3);
+    let donor = wallet(1);
+    let streamer = wallet(2);
+    let voter = wallet(3);
 
     let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
     let error = cast_vote(&pic, game, &task_id, &voter, ChoiceView::Done).unwrap_err();
     assert_eq!(error, "crown-index principal is not configured");
-    let record = task_state(&fetch_task(&pic, game, EVM, &task_id));
+    let record = task_state(&fetch_task(&pic, game, &task_id));
     assert!(record.votes.is_empty());
 }

@@ -4,8 +4,6 @@
 //! Usage:
 //!   participant task-message <chain> <canister-principal> <task_id_hex> <action_u8> <payload_hex>
 //!   participant register-payload <text_hash_hex> <duration_secs>
-//!   participant evm-sign <privkey_hex> <message_hex>
-//!   participant evm-address <privkey_hex>
 //!   participant sol-sign <keypair.json> <message_hex>
 //!   participant sol-address <keypair.json>
 
@@ -28,15 +26,6 @@ fn solana_key(path: &str) -> ed25519_dalek::SigningKey {
         .collect();
     let secret: [u8; 32] = bytes[..32].try_into().expect("keypair length");
     ed25519_dalek::SigningKey::from_bytes(&secret)
-}
-
-fn eip191_digest(message: &[u8]) -> [u8; 32] {
-    use sha3::Digest;
-    let mut hasher = sha3::Keccak256::new();
-    hasher.update(b"\x19Ethereum Signed Message:\n");
-    hasher.update(message.len().to_string().as_bytes());
-    hasher.update(message);
-    hasher.finalize().into()
 }
 
 fn main() {
@@ -63,24 +52,6 @@ fn main() {
                 &hex_arg(text_hash),
                 duration.parse().expect("duration"),
             ))
-        }
-        Some("evm-sign") => {
-            let [key, message] = &args[2..] else {
-                panic!("evm-sign <privkey_hex> <message_hex>");
-            };
-            let key = k256::ecdsa::SigningKey::from_slice(&hex_arg(key)).expect("evm key");
-            let digest = eip191_digest(&hex_arg(message));
-            let (sig, recovery) = key.sign_prehash_recoverable(&digest).expect("sign");
-            let mut out = sig.to_bytes().to_vec();
-            out.push(27 + recovery.to_byte());
-            hex::encode(out)
-        }
-        Some("evm-address") => {
-            let [key] = &args[2..] else {
-                panic!("evm-address <privkey_hex>");
-            };
-            let key = k256::ecdsa::SigningKey::from_slice(&hex_arg(key)).expect("evm key");
-            hex::encode(auth::eth_address(key.verifying_key()))
         }
         Some("sol-sign") => {
             let [keypair, message] = &args[2..] else {

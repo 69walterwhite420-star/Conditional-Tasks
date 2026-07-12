@@ -25,11 +25,7 @@ use serde::Deserialize;
 pub struct ChainSpec {
     pub id: &'static str,
     pub factory: &'static str,
-    /// EVM shape constant; empty on Solana.
-    pub escrow_init_code_hash: &'static str,
-    /// Numeric chain id, part of the verdict digest; 0 on Solana.
-    pub evm_chain_id: u64,
-    /// Cluster-scoped verdict domain; empty on EVM.
+    /// Cluster-scoped verdict domain, part of the signed message.
     pub domain: &'static str,
     /// The shape's on-chain floor in USDC minor units.
     pub min_gross: u64,
@@ -42,8 +38,7 @@ pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub(crate) const TASKS_MEMORY: MemoryId = MemoryId::new(0);
 pub(crate) const CHANNELS_MEMORY: MemoryId = MemoryId::new(1);
 pub(crate) const CROWN_INDEX_MEMORY: MemoryId = MemoryId::new(2);
-pub(crate) const ECDSA_KEY_MEMORY: MemoryId = MemoryId::new(3);
-pub(crate) const SCHNORR_KEY_MEMORY: MemoryId = MemoryId::new(4);
+pub(crate) const SCHNORR_KEY_MEMORY: MemoryId = MemoryId::new(3);
 
 /// The timer only backstops "time first" inside every step: a late tick can
 /// delay a due transition, never corrupt it.
@@ -70,10 +65,8 @@ thread_local! {
     static CROWN_INDEX_OVERRIDE: RefCell<StableCell<Vec<u8>, Memory>> =
         RefCell::new(StableCell::init(memory(CROWN_INDEX_MEMORY), Vec::new()));
 
-    /// Cached threshold public keys (sec1 secp256k1 / ed25519); fetched by
-    /// the timer once and then immutable — the keys derive from canister_id.
-    static ECDSA_PUBLIC_KEY: RefCell<StableCell<Vec<u8>, Memory>> =
-        RefCell::new(StableCell::init(memory(ECDSA_KEY_MEMORY), Vec::new()));
+    /// Cached threshold public key (ed25519); fetched by the timer once and
+    /// then immutable — the key derives from canister_id.
     static SCHNORR_PUBLIC_KEY: RefCell<StableCell<Vec<u8>, Memory>> =
         RefCell::new(StableCell::init(memory(SCHNORR_KEY_MEMORY), Vec::new()));
 
@@ -297,14 +290,6 @@ pub(crate) fn requeue_signature(key: Vec<u8>) {
     PENDING_SIGN.with_borrow_mut(|set| {
         set.insert(key);
     });
-}
-
-pub(crate) fn ecdsa_public_key_bytes() -> Vec<u8> {
-    ECDSA_PUBLIC_KEY.with_borrow(|cell| cell.get().clone())
-}
-
-pub(crate) fn set_ecdsa_public_key(key: Vec<u8>) {
-    ECDSA_PUBLIC_KEY.with_borrow_mut(|cell| cell.set(key));
 }
 
 pub(crate) fn schnorr_public_key_bytes() -> Vec<u8> {
