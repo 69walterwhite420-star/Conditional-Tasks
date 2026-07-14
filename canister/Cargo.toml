@@ -9,6 +9,7 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 conditional-tasks-logic = { path = "../logic" }
 crown-derive = { version = "0.1.0", path = "../../../Crown-Factory/derive" }
+crown-salt = { version = "0.1.0", path = "../../../Crown-Factory/salt" }
 candid = "0.10"
 ic-cdk = "0.20"
 ic-cdk-management-canister = "0.1"

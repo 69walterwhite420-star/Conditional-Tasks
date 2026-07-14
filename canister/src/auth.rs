@@ -5,8 +5,6 @@
 //!
 //! Byte layouts here are a frozen protocol; the unit tests pin them.
 
-use sha2::{Digest, Sha256};
-
 use crate::ChainSpec;
 
 /// Domain separator of every participant message. Versioned: a canister with
@@ -146,18 +144,12 @@ pub fn derive_task_id(
     let donor: [u8; 32] = donor.try_into().map_err(|_| AuthError::BadFieldLength)?;
     let streamer: [u8; 32] = streamer.try_into().map_err(|_| AuthError::BadFieldLength)?;
     let resolver: [u8; 32] = resolver.try_into().map_err(|_| AuthError::BadFieldLength)?;
-    // The on-chain program takes deadline as i64.
+    // The on-chain program takes deadline as i64; out-of-range is caught here.
     let deadline = i64::try_from(deadline).map_err(|_| AuthError::DeadlineOverflow)?;
-    // salt = sha256(donor ‖ streamer ‖ gross_le ‖ deadline_le ‖ resolver ‖
-    // nonce_le) — exactly the program's birth_salt.
-    let mut hasher = Sha256::new();
-    hasher.update(donor);
-    hasher.update(streamer);
-    hasher.update(gross.to_le_bytes());
-    hasher.update(deadline.to_le_bytes());
-    hasher.update(resolver);
-    hasher.update(nonce.to_le_bytes());
-    let salt: [u8; 32] = hasher.finalize().into();
+    // The shape owns its byte format: `crown-salt` is the single offchain
+    // definition of the salt, parity-tested against the deployed program's
+    // `birth_salt`.
+    let salt = crown_salt::two_outcome::salt(&donor, &streamer, gross, deadline, &resolver, nonce);
 
     let program: [u8; 32] = bs58::decode(spec.factory)
         .into_vec()
@@ -197,6 +189,8 @@ pub fn validate_config() -> Result<(), AuthError> {
     clippy::indexing_slicing
 )]
 mod tests {
+    use sha2::{Digest, Sha256};
+
     use super::*;
 
     // ---- frozen message layouts -----------------------------------------
