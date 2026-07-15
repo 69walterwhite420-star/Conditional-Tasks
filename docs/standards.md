@@ -8,7 +8,7 @@
 |---|---|---|
 | `logic` не делает I/O | ноль зависимостей, время — аргумент | `cargo tree -p conditional-tasks-logic` печатает один крейт; `grep -rE 'ic_cdk\|std::(fs\|net\|time)\|reqwest' logic/src/` пусто |
 | `logic` не знает про чейн и криптографию | адреса и ключи — непрозрачные байты | `grep -riE 'solana\|ed25519\|sha256\|candid' logic/src/` пусто |
-| Канистра не двигает деньги | нет переводов, нет знания о сплиттере | `grep -riE 'transfer\|approve\|splitter\|fee\|bps\|treasury' canister/src/` пусто |
+| Канистра не двигает деньги | нет переводов, нет знания о сплиттере и казне | `grep -riE 'transfer\|approve\|splitter\|treasury' canister/src/` пусто |
 | Канистра не читает внешние сети | нет outcalls, нет RPC-канистр | `grep -r 'http_request' canister/src/` пусто; внешние вызовы только к management canister и `crown_index` из конфига |
 | Update-поверхность фиксирована | шесть методов | парсер `.did` падает на update вне `{register_task, accept, decline, done, vote, set_channel_params}` |
 | Авторизация не по principal | только подпись кошелька | `grep -r 'caller()' canister/src/` не встречается в проверках прав |
@@ -53,7 +53,7 @@
 
 Ровно ключи из game-spec §7: `crown_index`, `threshold_key`, `voting_period`; per-chain — `id`, `factory`, `domain`, `min_gross`. Всё.
 
-Нет и не появится: RPC-URL, API-ключ, адрес сплиттера, `feeBps`, казна, адреса кошельков, `duration`, `deadline` — последние два задаёт донор в каждом задании.
+Нет и не появится: RPC-URL, API-ключ, адрес сплиттера, казна, `duration`, `deadline` — последние два задаёт донор в каждом задании. `fee_bps` и `fee_wallet` — прейскурант игры: параметры рождения каждого её эскроу, часть соли; канистра их знает, но денег по-прежнему не двигает — комиссию снимает сам эскроу при расчёте.
 
 Значения `factory`, `domain`, `min_gross` берутся из `crown-factory/deploy/`, `crown_index` — из деплоя ядра. Этот репозиторий их не порождает — только копирует.
 

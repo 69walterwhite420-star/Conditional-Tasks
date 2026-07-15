@@ -4,7 +4,7 @@
 //!
 //! Usage:
 //!   e2e-solana donate  <rpc> <donor.json> <streamer_b58> <gross>
-//!   e2e-solana create  <rpc> <donor.json> <streamer_b58> <gross> <deadline> <resolver_hex32> <nonce>
+//!   e2e-solana create  <rpc> <donor.json> <streamer_b58> <gross> <deadline> <resolver_hex32> <fee_bps> <fee_wallet_b58> <nonce>
 //!   e2e-solana claim   <rpc> <payer.json> <escrow_b58> <outcome> <sig_hex> <resolver_hex32>
 //!   e2e-solana refund  <rpc> <payer.json> <escrow_b58>
 //!   e2e-solana balance <rpc> <owner_b58>
@@ -97,7 +97,6 @@ fn main() {
                 mint: splitter::USDC_MINT,
                 payer_usdc: ata(&donor.pubkey()),
                 streamer_usdc: ata(&streamer),
-                treasury_usdc: ata(&splitter::TREASURY),
                 token_program: spl_token::ID,
                 event_authority: Pubkey::find_program_address(
                     &[b"__event_authority"],
@@ -120,8 +119,13 @@ fn main() {
             );
         }
         Some("create") => {
-            let [rpc, keypair, streamer, gross, deadline, resolver, nonce] = &args[2..] else {
-                panic!("create <rpc> <donor.json> <streamer_b58> <gross> <deadline> <resolver_hex32> <nonce>");
+            let [rpc, keypair, streamer, gross, deadline, resolver, fee_bps, fee_wallet, nonce] =
+                &args[2..]
+            else {
+                panic!(
+                    "create <rpc> <donor.json> <streamer_b58> <gross> <deadline> \
+                     <resolver_hex32> <fee_bps> <fee_wallet_b58> <nonce>"
+                );
             };
             let rpc = client(rpc);
             let donor = read_keypair_file(keypair).expect("donor keypair");
@@ -129,6 +133,8 @@ fn main() {
             let gross: u64 = gross.parse().expect("gross");
             let deadline: i64 = deadline.parse().expect("deadline");
             let nonce: u64 = nonce.parse().expect("nonce");
+            let fee_bps: u16 = fee_bps.parse().expect("fee_bps");
+            let fee_wallet = Pubkey::from_str(fee_wallet).expect("fee wallet");
             let resolver =
                 Pubkey::new_from_array(hex::decode(resolver).unwrap().try_into().unwrap());
             let salt = factory::birth_salt(
@@ -137,6 +143,8 @@ fn main() {
                 gross,
                 deadline,
                 &resolver,
+                fee_bps,
+                &fee_wallet,
                 nonce,
             );
             let (escrow, _) = Pubkey::find_program_address(&[b"escrow", &salt], &factory::ID);
@@ -161,6 +169,8 @@ fn main() {
                         gross,
                         deadline,
                         resolver,
+                        fee_bps,
+                        fee_wallet,
                         nonce,
                     }
                     .data(),
@@ -194,7 +204,7 @@ fn main() {
                 donor_usdc: Some(ata(&state.donor)),
                 streamer: state.streamer,
                 streamer_usdc: Some(ata(&state.streamer)),
-                splitter_aux_usdc: Some(ata(&splitter::TREASURY)),
+                fee_usdc: Some(ata(&state.fee_wallet)),
                 splitter_event_authority: Some(
                     Pubkey::find_program_address(&[b"__event_authority"], &factory::SPLITTER).0,
                 ),
@@ -207,6 +217,7 @@ fn main() {
                 &payer,
                 &[
                     create_ata_ix(&payer.pubkey(), &state.streamer),
+                    create_ata_ix(&payer.pubkey(), &state.fee_wallet),
                     verdict_ix(&resolver, &signature, &message),
                     Instruction {
                         program_id: factory::ID,

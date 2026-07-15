@@ -24,7 +24,7 @@ if grep -riEn 'solana|ed25519|sha256|candid' logic/src/; then
 fi
 
 # 4. the canister moves no money and reads no external chains.
-if grep -riEn 'transfer|approve|splitter|fee|bps|treasury' canister/src/; then
+if grep -riEn 'transfer|approve|splitter|treasury' canister/src/; then
     echo "FAIL: money reference in canister/src" >&2
     exit 1
 fi

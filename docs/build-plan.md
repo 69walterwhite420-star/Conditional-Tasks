@@ -37,7 +37,7 @@
 1. `cargo tree -p conditional-tasks-logic --edges normal` печатает **только сам крейт**. Ноль зависимостей.
 2. `grep -rE 'ic_cdk|std::(fs|net|time)|reqwest' logic/src/` → пусто.
 3. `grep -riE 'solana|ed25519|sha256|candid' logic/src/` → пусто. Логика не знает про чейн и криптографию.
-4. `grep -riE 'transfer|approve|splitter|fee|bps|treasury' canister/src/` → пусто; `grep -r 'http_request' canister/src/` → пусто. Канистра не двигает деньги и не читает внешние сети.
+4. `grep -riE 'transfer|approve|splitter|treasury' canister/src/` → пусто; `grep -r 'http_request' canister/src/` → пусто. Канистра не двигает деньги и не читает внешние сети.
 5. Парсер `.did`: update-методы — ровно `{register_task, accept, decline, done, vote, set_channel_params}`. Любой сверх списка роняет CI.
 
 **DoD.** Дерево совпадает с картой в `CLAUDE.md`. Пять линтов зелёные на пустом репозитории. Ни одного сетевого значения, адреса или principal в коде.

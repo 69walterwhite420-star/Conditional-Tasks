@@ -45,11 +45,14 @@ fn main() {
         let get = |key: &str| value_of(block, key, &context);
         chains.push_str(&format!(
             "    ChainSpec {{ id: {id:?}, factory: {factory:?}, \
-             domain: {domain:?}, min_gross: {min_gross} }},\n",
+             domain: {domain:?}, min_gross: {min_gross}, \
+             fee_bps: {fee_bps}, fee_wallet: {fee_wallet:?} }},\n",
             id = get("id"),
             factory = get("factory"),
             domain = get("domain"),
             min_gross = get("min_gross"),
+            fee_bps = get("fee_bps"),
+            fee_wallet = get("fee_wallet"),
         ));
     }
 

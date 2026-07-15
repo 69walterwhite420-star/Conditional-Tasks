@@ -27,8 +27,13 @@ pub struct ChainSpec {
     pub factory: &'static str,
     /// Cluster-scoped verdict domain, part of the signed message.
     pub domain: &'static str,
-    /// The shape's on-chain floor in USDC minor units.
+    /// The game's own acceptance floor in USDC minor units.
     pub min_gross: u64,
+    /// The game's price tag: birth fields of every escrow it recognizes.
+    /// An escrow born with a different fee derives a different salt and is
+    /// simply never this game's task.
+    pub fee_bps: u16,
+    pub fee_wallet: &'static str,
 }
 
 include!(concat!(env!("OUT_DIR"), "/profile.rs"));

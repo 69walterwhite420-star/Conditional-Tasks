@@ -18,6 +18,11 @@ voting_period = 120
 
 [[chain]]
 id        = "solana-devnet"
-factory   = "4VNAQAtgaUKCxn8ESzZsq5QPkGCypvXcsC6ehgLYY1zN"
+factory   = "83f7ziVs5VeQ8xiDka8zczbfJT4WcxsXQ18cqWwmV5ur"
 domain    = "crown:two-outcome:solana-devnet"
 min_gross = 34
+# The game's price tag (factory-spec §2.1): birth fields of every escrow this
+# game recognizes, part of the salt. The fee is carved out on settle by the
+# escrow itself; refunds are fee-free.
+fee_bps    = 300
+fee_wallet = "3it64t7KXNip1C1BRYNh8ygeKyujWnaQrPSj3hV9TWbE"

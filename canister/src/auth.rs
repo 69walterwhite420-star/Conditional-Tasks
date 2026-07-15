@@ -146,10 +146,26 @@ pub fn derive_task_id(
     let resolver: [u8; 32] = resolver.try_into().map_err(|_| AuthError::BadFieldLength)?;
     // The on-chain program takes deadline as i64; out-of-range is caught here.
     let deadline = i64::try_from(deadline).map_err(|_| AuthError::DeadlineOverflow)?;
+    // The game's fee is part of the salt: an escrow born with a price other
+    // than this game's derives a different address and never becomes a task.
+    let fee_wallet: [u8; 32] = bs58::decode(spec.fee_wallet)
+        .into_vec()
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or(AuthError::MalformedConfig)?;
     // The shape owns its byte format: `crown-salt` is the single offchain
     // definition of the salt, parity-tested against the deployed program's
     // `birth_salt`.
-    let salt = crown_salt::two_outcome::salt(&donor, &streamer, gross, deadline, &resolver, nonce);
+    let salt = crown_salt::two_outcome::salt(
+        &donor,
+        &streamer,
+        gross,
+        deadline,
+        &resolver,
+        spec.fee_bps,
+        &fee_wallet,
+        nonce,
+    );
 
     let program: [u8; 32] = bs58::decode(spec.factory)
         .into_vec()
@@ -170,6 +186,14 @@ pub fn validate_config() -> Result<(), AuthError> {
             .ok()
             .filter(|b| b.len() == 32)
             .ok_or(AuthError::MalformedConfig)?;
+        bs58::decode(spec.fee_wallet)
+            .into_vec()
+            .ok()
+            .filter(|b| b.len() == 32)
+            .ok_or(AuthError::MalformedConfig)?;
+        if spec.fee_bps >= 10_000 {
+            return Err(AuthError::MalformedConfig);
+        }
         if spec.domain.is_empty() {
             return Err(AuthError::MalformedConfig);
         }
@@ -284,16 +308,19 @@ mod tests {
     fn spec() -> ChainSpec {
         ChainSpec {
             id: "solana-devnet",
-            factory: "4VNAQAtgaUKCxn8ESzZsq5QPkGCypvXcsC6ehgLYY1zN",
+            factory: "83f7ziVs5VeQ8xiDka8zczbfJT4WcxsXQ18cqWwmV5ur",
             domain: "crown:two-outcome:solana-devnet",
             min_gross: 34,
+            fee_bps: 500,
+            // base58 of [0x44; 32], matching the crown-salt reference vector.
+            fee_wallet: "5bV6jUfhDHCQVA1WfKBUnXUsboJgoKgkzkKcxr3joew5",
         }
     }
 
     // Frozen cross-tool vector: salt is sha256 over the exact byte concat,
-    // computed independently with python3 hashlib over
-    // donor ‖ streamer ‖ u64le(1000000) ‖ i64le(1900000000) ‖ resolver ‖ u64le(7);
-    // the PDA arithmetic itself is parity-tested inside crown-derive.
+    // computed independently with python3 hashlib over donor ‖ streamer ‖
+    // u64le(1000000) ‖ i64le(1900000000) ‖ resolver ‖ u16le(500) ‖ fee_wallet
+    // ‖ u64le(7); the PDA arithmetic itself is parity-tested in crown-derive.
     #[test]
     fn task_id_matches_reference_salt() {
         let donor = [0x11; 32];
@@ -316,6 +343,8 @@ mod tests {
         hasher.update(1_000_000u64.to_le_bytes());
         hasher.update(1_900_000_000i64.to_le_bytes());
         hasher.update(resolver);
+        hasher.update(500u16.to_le_bytes());
+        hasher.update([0x44; 32]);
         hasher.update(7u64.to_le_bytes());
         let salt: [u8; 32] = hasher.finalize().into();
         let expected_salt: Vec<u8> = SALT_VECTOR
@@ -334,7 +363,7 @@ mod tests {
         assert_eq!(task_id, expected.to_vec());
     }
 
-    const SALT_VECTOR: &str = "afcf96c22076785f4be1e9d7a94a78e1f3e9e6ec5e8c7709ef786e9a294972ed";
+    const SALT_VECTOR: &str = "149c82b09a080ef4c92921d13d974177bfea2dd546ef8b798627e3e4245afe6b";
 
     #[test]
     fn derivation_rejects_wrong_field_lengths() {
