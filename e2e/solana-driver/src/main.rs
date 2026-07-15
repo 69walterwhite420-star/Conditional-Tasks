@@ -201,7 +201,7 @@ fn main() {
                 mint: factory::USDC_MINT,
                 escrow_usdc: ata(&escrow),
                 donor: state.donor,
-                donor_usdc: Some(ata(&state.donor)),
+                donor_usdc: ata(&state.donor),
                 streamer: state.streamer,
                 streamer_usdc: Some(ata(&state.streamer)),
                 fee_usdc: Some(ata(&state.fee_wallet)),
