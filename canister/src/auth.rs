@@ -180,7 +180,7 @@ pub fn derive_task_id(
 /// Deploy-time validation: every baked chain entry must parse. A canister
 /// with a malformed config must not exist.
 pub fn validate_config() -> Result<(), AuthError> {
-    for spec in crate::CHAINS {
+    for (i, spec) in crate::CHAINS.iter().enumerate() {
         bs58::decode(spec.factory)
             .into_vec()
             .ok()
@@ -199,6 +199,18 @@ pub fn validate_config() -> Result<(), AuthError> {
         }
         if spec.min_gross == 0 {
             return Err(AuthError::MalformedConfig);
+        }
+        // Chains must be pairwise distinct in id, domain and factory. The
+        // task_id (≡ escrow address) and its salt are chain-independent, so
+        // the cluster is separated only by DOMAIN (factory-spec §2.2): two
+        // chain entries sharing a (factory, domain) would derive one escrow
+        // for the same birth fields and one verdict message, and the single
+        // resolver key could then sign two outcomes for one escrow. Refuse
+        // such a config to exist.
+        for other in crate::CHAINS.iter().skip(i + 1) {
+            if spec.id == other.id || spec.domain == other.domain || spec.factory == other.factory {
+                return Err(AuthError::MalformedConfig);
+            }
         }
     }
     Ok(())
