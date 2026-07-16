@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# G4 e2e (docs/build-plan.md): вердикты канистры против реального devnet.
+# G4 e2e (docs/build-plan.md): canister verdicts against the real devnet.
 #
-# На одной локальной реплике: crown-index (читает реальный devnet) и игровая
-# канистра (threshold-ключ локальной реплики). Три акта, строго по одному
-# эскроу за раз — так пик по USDC и SOL-ренте минимален:
-#   1. прямой донат даёт донору репутацию — ей он потом голосует;
-#   2. задание B: register → decline → вердикт cancel; подпись cancel не
-#      открывает settle (негативный тест против контракта); claim(1) —
-#      деньги вернулись, Settled нет;
-#   3. эскроу C (вне игры, короткий дедлайн): refund() — Settled нет;
-#   4. задание A: register → accept → done → голос → вердикт settle →
-#      claim(0) с подписью канистры → Settled → книга начисляет ДОНОРУ;
-#   5. итог книги точен, аномалий ноль.
+# One local replica runs both crown-index (reading the real devnet) and the
+# game canister (the replica's threshold key). Three acts, strictly one
+# escrow at a time — that keeps the peak USDC and SOL-rent draw minimal:
+#   1. a direct donate gives the donor the reputation they later vote with;
+#   2. task B: register → decline → cancel verdict; the cancel signature
+#      does not open settle (a negative test against the contract);
+#      claim(1) — the money returns, no Settled;
+#   3. escrow C (outside the game, short deadline): refund() — no Settled;
+#   4. task A: register → accept → done → vote → settle verdict →
+#      claim(0) with the canister's signature → Settled → the book credits
+#      the DONOR;
+#   5. the book total is exact, zero anomalies.
 #
-# С testnet-профилем (voting_period = 120 с) и финальностью devnet в секунды
-# полный прогон занимает ~10 минут.
+# With the testnet profile (voting_period = 120 s) and devnet finality in
+# seconds the full run takes ~10 minutes.
 #
 # Usage: scripts/e2e-devnet.sh
 set -euo pipefail
@@ -22,8 +23,8 @@ cd "$(dirname "$0")/.."
 
 SOL_RPC_URL=${SOL_RPC_URL:-https://api.devnet.solana.com}
 SOL_DONOR_KEYPAIR=${SOL_DONOR_KEYPAIR:-$HOME/.cache/crown-e2e/donor.json}
-# Постоянный ключ стримера: выплаты и рента его ATA остаются возвращаемыми
-# между прогонами, а не сгорают с одноразовым ключом.
+# The streamer's permanent key: payouts and its ATA rent stay recoverable
+# between runs instead of burning with a throwaway key.
 SOL_STREAMER_KEYPAIR=${SOL_STREAMER_KEYPAIR:-$HOME/.cache/crown-e2e/streamer.json}
 CORE=$(cd ../../Crown-Core && pwd)
 
@@ -31,7 +32,8 @@ VOTING_PERIOD=$(grep "^voting_period" config/testnet.toml | cut -d"=" -f2 | tr -
 FEE_BPS=$(grep "^fee_bps" config/testnet.toml | cut -d"=" -f2 | tr -d " ")
 FEE_WALLET=$(grep "^fee_wallet" config/testnet.toml | cut -d'"' -f2)
 MARGIN=259200
-# Суммы ужаты под остаток devnet-кошелька; донат ровно на пороге веса голоса.
+# Amounts are sized to the devnet wallet; the donate sits exactly at the
+# vote weight floor.
 SOL_DONATE=100000
 A_GROSS=30000
 B_GROSS=10000
