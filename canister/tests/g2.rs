@@ -31,7 +31,7 @@ fn full_flow_with_certificates() {
         &pic,
         canister,
         "accept",
-        auth::ACTION_ACCEPT,
+        auth::Action::Accept,
         &registered.task_id,
         &streamer,
     )
@@ -47,7 +47,7 @@ fn full_flow_with_certificates() {
         &pic,
         canister,
         "done",
-        auth::ACTION_DONE,
+        auth::Action::Done,
         &registered.task_id,
         &streamer,
     )
@@ -87,7 +87,7 @@ fn foreign_signatures_are_rejected() {
         &pic,
         canister,
         "accept",
-        auth::ACTION_ACCEPT,
+        auth::Action::Accept,
         &a.task_id,
         &stranger,
     )
@@ -98,7 +98,7 @@ fn foreign_signatures_are_rejected() {
         &pic,
         canister,
         "accept",
-        auth::ACTION_ACCEPT,
+        auth::Action::Accept,
         &a.task_id,
         &donor,
     )
@@ -108,15 +108,14 @@ fn foreign_signatures_are_rejected() {
     // A signature for task B does not open task A: sign B's message, send to A.
     let message = auth::task_message(
         CHAIN,
-        canister.as_slice(),
+        &canister.to_text(),
         &b.task_id,
-        auth::ACTION_ACCEPT,
-        &[],
+        &auth::Action::Accept,
     );
     let arg = ActionArg {
         chain: CHAIN.to_string(),
         task_id: ByteBuf::from(a.task_id.clone()),
-        signature: ByteBuf::from(sign(&streamer, &message)),
+        signature: ByteBuf::from(sign(&streamer, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) = update(&pic, canister, "accept", Encode!(&arg).unwrap());
     assert_eq!(result.unwrap_err(), "bad signature");
@@ -124,15 +123,14 @@ fn foreign_signatures_are_rejected() {
     // A decline signature does not accept.
     let message = auth::task_message(
         CHAIN,
-        canister.as_slice(),
+        &canister.to_text(),
         &a.task_id,
-        auth::ACTION_DECLINE,
-        &[],
+        &auth::Action::Decline,
     );
     let arg = ActionArg {
         chain: CHAIN.to_string(),
         task_id: ByteBuf::from(a.task_id.clone()),
-        signature: ByteBuf::from(sign(&streamer, &message)),
+        signature: ByteBuf::from(sign(&streamer, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) = update(&pic, canister, "accept", Encode!(&arg).unwrap());
     assert_eq!(result.unwrap_err(), "bad signature");
@@ -174,10 +172,12 @@ fn registration_validation_and_duplicates() {
     let text_hash = [0x42u8; 32].to_vec();
     let message = auth::task_message(
         CHAIN,
-        canister.as_slice(),
+        &canister.to_text(),
         &task_id,
-        auth::ACTION_REGISTER,
-        &auth::register_payload(&text_hash, DURATION),
+        &auth::Action::Register {
+            text_hash: &text_hash,
+            duration: DURATION,
+        },
     );
     let arg = RegisterArg {
         chain: CHAIN.to_string(),
@@ -189,7 +189,7 @@ fn registration_validation_and_duplicates() {
         nonce: 9,
         duration: DURATION,
         text_hash: ByteBuf::from(text_hash),
-        signature: ByteBuf::from(sign(&donor, &message)),
+        signature: ByteBuf::from(sign(&donor, message.as_bytes())),
     };
     let (result,): (Result<ByteBuf, String>,) =
         update(&pic, canister, "register_task", Encode!(&arg).unwrap());
@@ -220,10 +220,12 @@ fn tampered_registration_fields_break_the_signature() {
     let text_hash = [0x42u8; 32].to_vec();
     let message = auth::task_message(
         CHAIN,
-        canister.as_slice(),
+        &canister.to_text(),
         &task_id,
-        auth::ACTION_REGISTER,
-        &auth::register_payload(&text_hash, DURATION),
+        &auth::Action::Register {
+            text_hash: &text_hash,
+            duration: DURATION,
+        },
     );
     // A relayer doubles the declared duration after the donor signed.
     let arg = RegisterArg {
@@ -236,7 +238,7 @@ fn tampered_registration_fields_break_the_signature() {
         nonce: 1,
         duration: DURATION * 2,
         text_hash: ByteBuf::from(text_hash),
-        signature: ByteBuf::from(sign(&donor, &message)),
+        signature: ByteBuf::from(sign(&donor, message.as_bytes())),
     };
     let (result,): (Result<ByteBuf, String>,) =
         update(&pic, canister, "register_task", Encode!(&arg).unwrap());
@@ -271,7 +273,7 @@ fn time_expires_tasks_with_and_without_the_timer() {
         &pic,
         canister,
         "accept",
-        auth::ACTION_ACCEPT,
+        auth::Action::Accept,
         &b.task_id,
         &streamer,
     )
@@ -298,7 +300,7 @@ fn empty_voting_cancels_by_timer() {
         &pic,
         canister,
         "accept",
-        auth::ACTION_ACCEPT,
+        auth::Action::Accept,
         &r.task_id,
         &streamer,
     )
@@ -307,7 +309,7 @@ fn empty_voting_cancels_by_timer() {
         &pic,
         canister,
         "done",
-        auth::ACTION_DONE,
+        auth::Action::Done,
         &r.task_id,
         &streamer,
     )
@@ -338,7 +340,7 @@ fn decline_after_accept_frees_the_task() {
         &pic,
         canister,
         "accept",
-        auth::ACTION_ACCEPT,
+        auth::Action::Accept,
         &r.task_id,
         &streamer,
     )
@@ -347,7 +349,7 @@ fn decline_after_accept_frees_the_task() {
         &pic,
         canister,
         "decline",
-        auth::ACTION_DECLINE,
+        auth::Action::Decline,
         &r.task_id,
         &streamer,
     )
@@ -364,7 +366,7 @@ fn decline_after_accept_frees_the_task() {
         &pic,
         canister,
         "decline",
-        auth::ACTION_DECLINE,
+        auth::Action::Decline,
         &r.task_id,
         &streamer,
     )
@@ -382,7 +384,7 @@ fn channel_params_counter_and_floor() {
     let set = |min_gross: u64, min_reputation: u128, enabled: bool, counter: u64| {
         let message = auth::channel_message(
             CHAIN,
-            canister.as_slice(),
+            &canister.to_text(),
             &streamer.address,
             min_gross,
             min_reputation,
@@ -396,7 +398,7 @@ fn channel_params_counter_and_floor() {
             min_reputation,
             enabled,
             counter,
-            signature: ByteBuf::from(sign(&streamer, &message)),
+            signature: ByteBuf::from(sign(&streamer, message.as_bytes())),
         };
         let (result,): (Result<(), String>,) =
             update(&pic, canister, "set_channel_params", Encode!(&arg).unwrap());

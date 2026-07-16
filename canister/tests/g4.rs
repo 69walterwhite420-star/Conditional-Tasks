@@ -61,7 +61,7 @@ fn cancel_verdict_is_signed_for_the_contract() {
         &pic,
         canister,
         "decline",
-        auth::ACTION_DECLINE,
+        auth::Action::Decline,
         &r.task_id,
         &streamer,
     )
@@ -98,7 +98,7 @@ fn settle_verdict_is_signed_after_votes() {
         &pic,
         canister,
         "accept",
-        auth::ACTION_ACCEPT,
+        auth::Action::Accept,
         &r.task_id,
         &streamer,
     )
@@ -107,7 +107,7 @@ fn settle_verdict_is_signed_after_votes() {
         &pic,
         canister,
         "done",
-        auth::ACTION_DONE,
+        auth::Action::Done,
         &r.task_id,
         &streamer,
     )
@@ -115,17 +115,16 @@ fn settle_verdict_is_signed_after_votes() {
 
     let message = auth::task_message(
         CHAIN,
-        canister.as_slice(),
+        &canister.to_text(),
         &r.task_id,
-        auth::ACTION_VOTE,
-        &[auth::CHOICE_DONE],
+        &auth::Action::Vote(auth::Choice::Done),
     );
     let arg = VoteArg {
         chain: CHAIN.to_string(),
         task_id: ByteBuf::from(r.task_id.clone()),
         voter: ByteBuf::from(voter.address.clone()),
         choice: ChoiceView::Done,
-        signature: ByteBuf::from(sign(&voter, &message)),
+        signature: ByteBuf::from(sign(&voter, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) = update(&pic, canister, "vote", Encode!(&arg).unwrap());
     result.unwrap();
@@ -175,10 +174,12 @@ fn foreign_resolver_is_rejected_at_registration() {
     let text_hash = Sha256::digest(b"text \x00 salt").to_vec();
     let message = auth::task_message(
         CHAIN,
-        canister.as_slice(),
+        &canister.to_text(),
         &task_id,
-        auth::ACTION_REGISTER,
-        &auth::register_payload(&text_hash, DURATION),
+        &auth::Action::Register {
+            text_hash: &text_hash,
+            duration: DURATION,
+        },
     );
     let arg = RegisterArg {
         chain: CHAIN.to_string(),
@@ -190,7 +191,7 @@ fn foreign_resolver_is_rejected_at_registration() {
         nonce: 1,
         duration: DURATION,
         text_hash: ByteBuf::from(text_hash),
-        signature: ByteBuf::from(sign(&donor, &message)),
+        signature: ByteBuf::from(sign(&donor, message.as_bytes())),
     };
     let (result,): (Result<ByteBuf, String>,) =
         update(&pic, canister, "register_task", Encode!(&arg).unwrap());

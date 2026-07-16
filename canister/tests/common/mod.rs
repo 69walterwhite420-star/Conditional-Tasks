@@ -199,10 +199,12 @@ pub fn register(
     let text_hash = Sha256::digest(b"do a backflip \x00 salt").to_vec();
     let message = auth::task_message(
         CHAIN,
-        canister.as_slice(),
+        &canister.to_text(),
         &task_id,
-        auth::ACTION_REGISTER,
-        &auth::register_payload(&text_hash, DURATION),
+        &auth::Action::Register {
+            text_hash: &text_hash,
+            duration: DURATION,
+        },
     );
     let arg = RegisterArg {
         chain: CHAIN.to_string(),
@@ -214,7 +216,7 @@ pub fn register(
         nonce,
         duration: DURATION,
         text_hash: ByteBuf::from(text_hash),
-        signature: ByteBuf::from(sign(donor, &message)),
+        signature: ByteBuf::from(sign(donor, message.as_bytes())),
     };
     let (result,): (Result<ByteBuf, String>,) =
         update(pic, canister, "register_task", Encode!(&arg).unwrap());
@@ -228,15 +230,15 @@ pub fn streamer_call(
     pic: &PocketIc,
     canister: Principal,
     method: &str,
-    action_byte: u8,
+    action: auth::Action<'_>,
     task_id: &[u8],
     signer: &Wallet,
 ) -> Result<(), String> {
-    let message = auth::task_message(CHAIN, canister.as_slice(), task_id, action_byte, &[]);
+    let message = auth::task_message(CHAIN, &canister.to_text(), task_id, &action);
     let arg = ActionArg {
         chain: CHAIN.to_string(),
         task_id: ByteBuf::from(task_id.to_vec()),
-        signature: ByteBuf::from(sign(signer, &message)),
+        signature: ByteBuf::from(sign(signer, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) = update(pic, canister, method, Encode!(&arg).unwrap());
     result

@@ -1,27 +1,70 @@
 //! Authorization is a wallet signature, never the calling principal
-//! (docs/game-spec.md §4): the message layout every participant signs, its
+//! (docs/game-spec.md §4): the message every participant signs, its
 //! verification, and the task_id derivation that notarizes the declared
 //! birth fields — the same arithmetic the core's indexer runs.
 //!
-//! Byte layouts here are a frozen protocol; the unit tests pin them.
+//! **Messages are UTF-8 text, and that is a hard requirement, not taste.**
+//! Wallets refuse to sign bytes they cannot show to a human: Phantom runs
+//! `isValidUTF8` over the payload and rejects everything else with "You
+//! cannot sign solana transactions using sign message". A binary protocol
+//! here means the game is unplayable with the largest Solana wallet — and a
+//! signature nobody can read is a signature nobody should be asked for.
+//!
+//! The text is a frozen protocol; the unit tests pin every line of it.
 
 use crate::ChainSpec;
 
-/// Domain separator of every participant message. Versioned: a canister with
-/// different rules is a different game and gets a different domain.
-pub const DOMAIN: &[u8] = b"crown:conditional-tasks:v1";
+/// Domain separator of every participant message, and its first line.
+/// Versioned: a canister with different rules is a different game and gets a
+/// different domain.
+pub const DOMAIN: &str = "crown:conditional-tasks:v1";
 
-/// Action bytes of the message protocol. Values are frozen forever.
-pub const ACTION_REGISTER: u8 = 0;
-pub const ACTION_ACCEPT: u8 = 1;
-pub const ACTION_DECLINE: u8 = 2;
-pub const ACTION_DONE: u8 = 3;
-pub const ACTION_VOTE: u8 = 4;
-pub const ACTION_SET_CHANNEL_PARAMS: u8 = 5;
+/// The vote, as the message spells it. Words are frozen forever.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    Done,
+    NotDone,
+}
 
-/// Vote payload bytes (the single payload byte of ACTION_VOTE).
-pub const CHOICE_DONE: u8 = 0;
-pub const CHOICE_NOT_DONE: u8 = 1;
+impl Choice {
+    pub fn word(self) -> &'static str {
+        match self {
+            Choice::Done => "done",
+            Choice::NotDone => "not_done",
+        }
+    }
+}
+
+/// What the participant is signing for. Carries the fields that belong to
+/// that action and nothing else — an action and its payload can no longer
+/// disagree, because there is no separate payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action<'a> {
+    Register { text_hash: &'a [u8], duration: u64 },
+    Accept,
+    Decline,
+    Done,
+    Vote(Choice),
+}
+
+impl Action<'_> {
+    /// The word that names the action in the message. Frozen forever.
+    pub fn word(&self) -> &'static str {
+        match self {
+            Action::Register { .. } => "register",
+            Action::Accept => "accept",
+            Action::Decline => "decline",
+            Action::Done => "done",
+            Action::Vote(_) => "vote",
+        }
+    }
+}
+
+/// Lowercase hex. `hex` is a dev-dependency only, and one line of code is
+/// cheaper than making it a runtime one.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthError {
@@ -53,62 +96,86 @@ pub fn spec_of(chain: &str) -> Result<&'static ChainSpec, AuthError> {
         .ok_or(AuthError::UnknownChain)
 }
 
-/// Length-prefixed part: u32 le length, then the bytes. Variable-length
-/// parts are always framed so no two field splits share an encoding.
-fn lp(out: &mut Vec<u8>, part: &[u8]) {
-    out.extend((part.len() as u32).to_le_bytes());
-    out.extend_from_slice(part);
-}
-
-/// The message a participant signs about one task:
-/// `DOMAIN ‖ lp(chain) ‖ lp(canister_id) ‖ lp(task_id) ‖ action ‖ lp(payload)`.
-pub fn task_message(
-    chain: &str,
-    canister_id: &[u8],
-    task_id: &[u8],
-    action: u8,
-    payload: &[u8],
-) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(DOMAIN);
-    lp(&mut out, chain.as_bytes());
-    lp(&mut out, canister_id);
-    lp(&mut out, task_id);
-    out.push(action);
-    lp(&mut out, payload);
-    out
-}
-
-/// Registration payload: the text commitment and the game-level duration —
-/// the two facts not already notarized by the task_id itself.
-pub fn register_payload(text_hash: &[u8], duration: u64) -> Vec<u8> {
-    let mut out = Vec::new();
-    lp(&mut out, text_hash);
-    out.extend(duration.to_le_bytes());
+/// The message a participant signs about one task. One field per line,
+/// `key: value`, in this exact order:
+///
+/// ```text
+/// crown:conditional-tasks:v1
+/// action: accept
+/// chain: solana-devnet
+/// canister: vizcg-th777-77774-qaaea-cai
+/// task: 3tjoUqMwgUcyfWqYvDMGRY5gBXPNPKyY3gErYhJGqxcu
+/// ```
+///
+/// `register` adds `text:` (hex) and `duration:`; `vote` adds `choice:`.
+///
+/// The encoding is injective — two different messages cannot render to the
+/// same text — because the keys are fixed and ordered, the action decides
+/// which keys follow, and no value can contain a newline: addresses are
+/// base58, hashes are hex, numbers are decimal, words are a closed
+/// vocabulary, and `validate_config` refuses a chain id with anything else
+/// in it.
+pub fn task_message(chain: &str, canister_id: &str, task_id: &[u8], action: &Action) -> String {
+    let mut out = String::new();
+    out.push_str(DOMAIN);
+    out.push('\n');
+    out.push_str(&format!("action: {}\n", action.word()));
+    out.push_str(&format!("chain: {chain}\n"));
+    out.push_str(&format!("canister: {canister_id}\n"));
+    // task_id ≡ the escrow address, so base58 is the form the signer can
+    // compare against an explorer.
+    out.push_str(&format!("task: {}\n", bs58::encode(task_id).into_string()));
+    match action {
+        Action::Register {
+            text_hash,
+            duration,
+        } => {
+            out.push_str(&format!("text: {}\n", hex(text_hash)));
+            out.push_str(&format!("duration: {duration}\n"));
+        }
+        Action::Vote(choice) => out.push_str(&format!("choice: {}\n", choice.word())),
+        Action::Accept | Action::Decline | Action::Done => {}
+    }
     out
 }
 
 /// The message a streamer signs to change channel knobs. The monotonic
 /// counter keeps an old signature from being replayed.
+///
+/// ```text
+/// crown:conditional-tasks:v1
+/// action: set-channel-params
+/// chain: solana-devnet
+/// canister: vizcg-th777-77774-qaaea-cai
+/// streamer: Gt381v8RqGQUX7vdRbC9NdZCzGuzk6ZUgcTDLfUnYdcJ
+/// min_gross: 34
+/// min_reputation: 0
+/// enabled: true
+/// counter: 7
+/// ```
 pub fn channel_message(
     chain: &str,
-    canister_id: &[u8],
+    canister_id: &str,
     streamer: &[u8],
     min_gross: u64,
     min_reputation: u128,
     enabled: bool,
     counter: u64,
-) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(DOMAIN);
-    lp(&mut out, chain.as_bytes());
-    lp(&mut out, canister_id);
-    out.push(ACTION_SET_CHANNEL_PARAMS);
-    lp(&mut out, streamer);
-    out.extend(min_gross.to_le_bytes());
-    out.extend(min_reputation.to_le_bytes());
-    out.push(u8::from(enabled));
-    out.extend(counter.to_le_bytes());
+) -> String {
+    let mut out = String::new();
+    out.push_str(DOMAIN);
+    out.push('\n');
+    out.push_str("action: set-channel-params\n");
+    out.push_str(&format!("chain: {chain}\n"));
+    out.push_str(&format!("canister: {canister_id}\n"));
+    out.push_str(&format!(
+        "streamer: {}\n",
+        bs58::encode(streamer).into_string()
+    ));
+    out.push_str(&format!("min_gross: {min_gross}\n"));
+    out.push_str(&format!("min_reputation: {min_reputation}\n"));
+    out.push_str(&format!("enabled: {enabled}\n"));
+    out.push_str(&format!("counter: {counter}\n"));
     out
 }
 
@@ -200,6 +267,18 @@ pub fn validate_config() -> Result<(), AuthError> {
         if spec.min_gross == 0 {
             return Err(AuthError::MalformedConfig);
         }
+        // The chain id goes into the signed text as a value. A newline (or a
+        // control character) in it would let one chain id render a message
+        // another chain id could also render — the encoding must stay
+        // injective, so refuse such a config to exist at all.
+        if spec.id.is_empty()
+            || !spec
+                .id
+                .chars()
+                .all(|c| c.is_ascii_graphic() && c != ':' && c != '\n')
+        {
+            return Err(AuthError::MalformedConfig);
+        }
         // Chains must be pairwise distinct in id, domain and factory. The
         // task_id (≡ escrow address) and its salt are chain-independent, so
         // the cluster is separated only by DOMAIN (factory-spec §2.2): two
@@ -231,54 +310,197 @@ mod tests {
 
     // ---- frozen message layouts -----------------------------------------
 
+    const CANISTER: &str = "vizcg-th777-77774-qaaea-cai";
+    /// base58 of [0xCC; 32], computed independently with python.
+    const TASK_B58: &str = "EnTJCS15dqbDTU2XywYSMaScoPv4Py4GzExrtY9DQxoD";
+
     #[test]
-    fn task_message_layout_is_pinned() {
-        let message = task_message("solana-devnet", &[0xAA, 0xBB], &[0xCC], ACTION_ACCEPT, &[]);
-        let mut expected = Vec::new();
-        expected.extend_from_slice(b"crown:conditional-tasks:v1");
-        expected.extend(13u32.to_le_bytes());
-        expected.extend_from_slice(b"solana-devnet");
-        expected.extend(2u32.to_le_bytes());
-        expected.extend_from_slice(&[0xAA, 0xBB]);
-        expected.extend(1u32.to_le_bytes());
-        expected.extend_from_slice(&[0xCC]);
-        expected.push(1);
-        expected.extend(0u32.to_le_bytes());
-        assert_eq!(message, expected);
+    fn accept_message_is_pinned() {
+        assert_eq!(
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Accept),
+            format!(
+                "crown:conditional-tasks:v1\n\
+                 action: accept\n\
+                 chain: solana-devnet\n\
+                 canister: {CANISTER}\n\
+                 task: {TASK_B58}\n"
+            )
+        );
     }
 
     #[test]
-    fn choice_bytes_are_pinned() {
-        assert_eq!((CHOICE_DONE, CHOICE_NOT_DONE), (0, 1));
+    fn register_message_is_pinned() {
+        let message = task_message(
+            "solana-devnet",
+            CANISTER,
+            &[0xCC; 32],
+            &Action::Register {
+                text_hash: &[0x11; 2],
+                duration: 300,
+            },
+        );
+        assert_eq!(
+            message,
+            format!(
+                "crown:conditional-tasks:v1\n\
+                 action: register\n\
+                 chain: solana-devnet\n\
+                 canister: {CANISTER}\n\
+                 task: {TASK_B58}\n\
+                 text: 1111\n\
+                 duration: 300\n"
+            )
+        );
     }
 
     #[test]
-    fn register_payload_layout_is_pinned() {
-        let payload = register_payload(&[0x11; 2], 300);
-        let mut expected = Vec::new();
-        expected.extend(2u32.to_le_bytes());
-        expected.extend_from_slice(&[0x11; 2]);
-        expected.extend(300u64.to_le_bytes());
-        assert_eq!(payload, expected);
+    fn vote_message_is_pinned() {
+        for (choice, word) in [(Choice::Done, "done"), (Choice::NotDone, "not_done")] {
+            assert_eq!(
+                task_message(
+                    "solana-devnet",
+                    CANISTER,
+                    &[0xCC; 32],
+                    &Action::Vote(choice)
+                ),
+                format!(
+                    "crown:conditional-tasks:v1\n\
+                     action: vote\n\
+                     chain: solana-devnet\n\
+                     canister: {CANISTER}\n\
+                     task: {TASK_B58}\n\
+                     choice: {word}\n"
+                )
+            );
+        }
     }
 
     #[test]
-    fn channel_message_layout_is_pinned() {
-        let message = channel_message("solana-devnet", &[0x01], &[0x02], 34, 5, true, 7);
-        let mut expected = Vec::new();
-        expected.extend_from_slice(b"crown:conditional-tasks:v1");
-        expected.extend(13u32.to_le_bytes());
-        expected.extend_from_slice(b"solana-devnet");
-        expected.extend(1u32.to_le_bytes());
-        expected.push(0x01);
-        expected.push(ACTION_SET_CHANNEL_PARAMS);
-        expected.extend(1u32.to_le_bytes());
-        expected.push(0x02);
-        expected.extend(34u64.to_le_bytes());
-        expected.extend(5u128.to_le_bytes());
-        expected.push(1);
-        expected.extend(7u64.to_le_bytes());
-        assert_eq!(message, expected);
+    fn channel_message_is_pinned() {
+        assert_eq!(
+            channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 7),
+            format!(
+                "crown:conditional-tasks:v1\n\
+                 action: set-channel-params\n\
+                 chain: solana-devnet\n\
+                 canister: {CANISTER}\n\
+                 streamer: {}\n\
+                 min_gross: 34\n\
+                 min_reputation: 5\n\
+                 enabled: true\n\
+                 counter: 7\n",
+                bs58::encode([0x02; 32]).into_string()
+            )
+        );
+    }
+
+    /// The whole point: a wallet must be able to show this to a human.
+    /// Phantom rejects anything that is not valid UTF-8, so every message the
+    /// protocol can produce must be printable ASCII.
+    #[test]
+    fn every_message_is_printable_ascii() {
+        let messages = [
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Accept),
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Decline),
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Done),
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::Vote(Choice::NotDone),
+            ),
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::Register {
+                    text_hash: &[0xFF; 32],
+                    duration: u64::MAX,
+                },
+            ),
+            channel_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xFF; 32],
+                u64::MAX,
+                u128::MAX,
+                false,
+                u64::MAX,
+            ),
+        ];
+        for message in messages {
+            assert!(
+                message
+                    .chars()
+                    .all(|c| c == '\n' || c.is_ascii_graphic() || c == ' '),
+                "not printable: {message:?}"
+            );
+        }
+    }
+
+    /// Injectivity: no two distinct messages may render the same text, or one
+    /// signature would open two doors.
+    #[test]
+    fn distinct_messages_render_distinctly() {
+        let mut seen = std::collections::BTreeSet::new();
+        let messages = [
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Accept),
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Decline),
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Done),
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::Vote(Choice::Done),
+            ),
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::Vote(Choice::NotDone),
+            ),
+            // Another task, another chain, another canister.
+            task_message("solana-devnet", CANISTER, &[0xCD; 32], &Action::Accept),
+            task_message("solana-mainnet", CANISTER, &[0xCC; 32], &Action::Accept),
+            task_message("solana-devnet", "aaaaa-aa", &[0xCC; 32], &Action::Accept),
+            // Register: both payload fields must split it.
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::Register {
+                    text_hash: &[0x11; 2],
+                    duration: 300,
+                },
+            ),
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::Register {
+                    text_hash: &[0x11; 2],
+                    duration: 301,
+                },
+            ),
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::Register {
+                    text_hash: &[0x12; 2],
+                    duration: 300,
+                },
+            ),
+            channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 7),
+            channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, false, 7),
+            channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 8),
+            channel_message("solana-devnet", CANISTER, &[0x03; 32], 34, 5, true, 7),
+        ];
+        let count = messages.len();
+        for message in messages {
+            assert!(seen.insert(message.clone()), "collision: {message:?}");
+        }
+        assert_eq!(seen.len(), count);
     }
 
     // ---- signatures -------------------------------------------------------
@@ -288,9 +510,9 @@ mod tests {
         use ed25519_dalek::Signer;
         let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
         let address = key.verifying_key().to_bytes().to_vec();
-        let message = task_message("solana-devnet", &[1], &[2; 32], ACTION_DONE, &[]);
-        let sig = key.sign(&message).to_bytes().to_vec();
-        verify_wallet_signature(&message, &sig, &address).unwrap();
+        let message = task_message("solana-devnet", CANISTER, &[2; 32], &Action::Done);
+        let sig = key.sign(message.as_bytes()).to_bytes().to_vec();
+        verify_wallet_signature(message.as_bytes(), &sig, &address).unwrap();
 
         // Foreign signer.
         let other = ed25519_dalek::SigningKey::from_bytes(&[10; 32])
@@ -298,19 +520,19 @@ mod tests {
             .to_bytes()
             .to_vec();
         assert_eq!(
-            verify_wallet_signature(&message, &sig, &other),
+            verify_wallet_signature(message.as_bytes(), &sig, &other),
             Err(AuthError::BadSignature)
         );
         // Foreign message: same signer, different task.
-        let foreign = task_message("solana-devnet", &[1], &[3; 32], ACTION_DONE, &[]);
+        let foreign = task_message("solana-devnet", CANISTER, &[3; 32], &Action::Done);
         assert_eq!(
-            verify_wallet_signature(&foreign, &sig, &address),
+            verify_wallet_signature(foreign.as_bytes(), &sig, &address),
             Err(AuthError::BadSignature)
         );
         // Foreign action: a decline signature does not accept.
-        let action = task_message("solana-devnet", &[1], &[2; 32], ACTION_DECLINE, &[]);
+        let action = task_message("solana-devnet", CANISTER, &[2; 32], &Action::Decline);
         assert_eq!(
-            verify_wallet_signature(&action, &sig, &address),
+            verify_wallet_signature(action.as_bytes(), &sig, &address),
             Err(AuthError::BadSignature)
         );
     }

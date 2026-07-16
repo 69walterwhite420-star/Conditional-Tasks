@@ -26,12 +26,12 @@ fn task_in_voting(
         pic,
         game,
         "accept",
-        auth::ACTION_ACCEPT,
+        auth::Action::Accept,
         &r.task_id,
         streamer,
     )
     .unwrap();
-    streamer_call(pic, game, "done", auth::ACTION_DONE, &r.task_id, streamer).unwrap();
+    streamer_call(pic, game, "done", auth::Action::Done, &r.task_id, streamer).unwrap();
     r.task_id
 }
 
@@ -42,23 +42,22 @@ fn cast_vote(
     voter: &Wallet,
     choice: ChoiceView,
 ) -> Result<(), String> {
-    let choice_byte = match choice {
-        ChoiceView::Done => auth::CHOICE_DONE,
-        ChoiceView::NotDone => auth::CHOICE_NOT_DONE,
+    let signed_choice = match choice {
+        ChoiceView::Done => auth::Choice::Done,
+        ChoiceView::NotDone => auth::Choice::NotDone,
     };
     let message = auth::task_message(
         CHAIN,
-        game.as_slice(),
+        &game.to_text(),
         task_id,
-        auth::ACTION_VOTE,
-        &[choice_byte],
+        &auth::Action::Vote(signed_choice),
     );
     let arg = VoteArg {
         chain: CHAIN.to_string(),
         task_id: ByteBuf::from(task_id.to_vec()),
         voter: ByteBuf::from(voter.address.clone()),
         choice,
-        signature: ByteBuf::from(sign(voter, &message)),
+        signature: ByteBuf::from(sign(voter, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) = update(pic, game, "vote", Encode!(&arg).unwrap());
     result
@@ -206,7 +205,7 @@ fn min_reputation_gates_registration() {
     // The streamer demands reputation from donors.
     let message = auth::channel_message(
         CHAIN,
-        game.as_slice(),
+        &game.to_text(),
         &streamer.address,
         34,
         1_000_000,
@@ -220,7 +219,7 @@ fn min_reputation_gates_registration() {
         min_reputation: 1_000_000,
         enabled: true,
         counter: 1,
-        signature: ByteBuf::from(sign(&streamer, &message)),
+        signature: ByteBuf::from(sign(&streamer, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) =
         update(&pic, game, "set_channel_params", Encode!(&arg).unwrap());

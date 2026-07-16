@@ -34,8 +34,9 @@ fn register_error_text(error: logic::RegisterError) -> String {
     .to_string()
 }
 
-fn canister_id() -> Vec<u8> {
-    ic_cdk::api::canister_self().as_slice().to_vec()
+/// The canister's own principal, in the text form the signed message shows.
+fn canister_id() -> String {
+    ic_cdk::api::canister_self().to_text()
 }
 
 // ---- updates -----------------------------------------------------------------
@@ -89,10 +90,12 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
         &arg.chain,
         &canister_id(),
         &task_id,
-        auth::ACTION_REGISTER,
-        &auth::register_payload(&arg.text_hash, arg.duration),
+        &auth::Action::Register {
+            text_hash: &arg.text_hash,
+            duration: arg.duration,
+        },
     );
-    auth::verify_wallet_signature(&message, &arg.signature, &arg.donor)
+    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &arg.donor)
         .map_err(|e| e.text().to_string())?;
 
     let channel = crate::load_channel(&arg.chain, &arg.streamer, spec.min_gross);
@@ -156,17 +159,17 @@ pub struct ActionArg {
 
 #[ic_cdk::update]
 fn accept(arg: ActionArg) -> Result<(), String> {
-    streamer_action(arg, logic::Action::Accept, auth::ACTION_ACCEPT)
+    streamer_action(arg, logic::Action::Accept, auth::Action::Accept)
 }
 
 #[ic_cdk::update]
 fn decline(arg: ActionArg) -> Result<(), String> {
-    streamer_action(arg, logic::Action::Decline, auth::ACTION_DECLINE)
+    streamer_action(arg, logic::Action::Decline, auth::Action::Decline)
 }
 
 #[ic_cdk::update]
 fn done(arg: ActionArg) -> Result<(), String> {
-    streamer_action(arg, logic::Action::Done, auth::ACTION_DONE)
+    streamer_action(arg, logic::Action::Done, auth::Action::Done)
 }
 
 #[derive(CandidType, Deserialize)]
@@ -189,18 +192,17 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
     // Authorize before touching state: a bogus signature must never cost a
     // certified write. The message binds neither time nor state, so it is
     // checked first (game-spec §6: signature, dedup, then weight).
-    let choice_byte = match arg.choice {
-        crate::ChoiceView::Done => auth::CHOICE_DONE,
-        crate::ChoiceView::NotDone => auth::CHOICE_NOT_DONE,
+    let choice = match arg.choice {
+        crate::ChoiceView::Done => auth::Choice::Done,
+        crate::ChoiceView::NotDone => auth::Choice::NotDone,
     };
     let message = auth::task_message(
         &arg.chain,
         &canister_id(),
         &arg.task_id,
-        auth::ACTION_VOTE,
-        &[choice_byte],
+        &auth::Action::Vote(choice),
     );
-    auth::verify_wallet_signature(&message, &arg.signature, &arg.voter)
+    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &arg.voter)
         .map_err(|e| e.text().to_string())?;
 
     // Time first, persisted: a late timer never extends the window.
@@ -242,12 +244,16 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
 /// The three streamer moves share one path: load, verify the streamer's
 /// signature over (task, action), step the machine. Time transitions that
 /// became due persist even when the action itself is rejected.
-fn streamer_action(arg: ActionArg, action: logic::Action, action_byte: u8) -> Result<(), String> {
+fn streamer_action(
+    arg: ActionArg,
+    action: logic::Action,
+    signed: auth::Action<'_>,
+) -> Result<(), String> {
     let key = crate::task_key(&arg.chain, &arg.task_id);
     let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
 
-    let message = auth::task_message(&arg.chain, &canister_id(), &arg.task_id, action_byte, &[]);
-    auth::verify_wallet_signature(&message, &arg.signature, &record.streamer)
+    let message = auth::task_message(&arg.chain, &canister_id(), &arg.task_id, &signed);
+    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &record.streamer)
         .map_err(|e| e.text().to_string())?;
 
     let mut task = record.to_logic();
@@ -289,7 +295,7 @@ fn set_channel_params(arg: ChannelArg) -> Result<(), String> {
         arg.enabled,
         arg.counter,
     );
-    auth::verify_wallet_signature(&message, &arg.signature, &arg.streamer)
+    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &arg.streamer)
         .map_err(|e| e.text().to_string())?;
     crate::save_channel(
         &arg.chain,

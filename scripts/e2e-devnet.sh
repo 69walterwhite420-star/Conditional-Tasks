@@ -96,11 +96,15 @@ else:
 "
 }
 
-sign_and_call() { # method task_id_hex action payload_hex signer_keypair
-    local method=$1 task_id=$2 action=$3 payload=$4 keypair=$5
-    local message sig
-    message=$(participant task-message solana-devnet "$GAME_ID" "$task_id" "$action" "$payload")
-    sig=$(participant sol-sign "$keypair" "$message")
+# The protocol message is UTF-8 text with newlines (auth.rs), so it travels
+# by file: a shell argument would mangle it, and one stray byte is a different
+# message.
+sign_and_call() { # method task_id_hex signer_keypair   (method == action word)
+    local method=$1 task_id=$2 keypair=$3
+    local msg sig
+    msg=$(mktemp); trap 'rm -f "$msg"' RETURN
+    participant task-message solana-devnet "$GAME_ID" "$task_id" "$method" > "$msg"
+    sig=$(participant sol-sign "$keypair" "$msg")
     game_call "$method" "(record { chain = \"solana-devnet\"; task_id = blob \"$(blob_hex "$task_id")\"; signature = blob \"$(blob_hex "$sig")\" })"
 }
 
@@ -168,11 +172,11 @@ echo "resolver=$RESOLVER"
 
 register_task() { # gross deadline task_id_hex nonce
     local gross=$1 deadline=$2 task_id=$3 nonce=$4
-    local text_hash payload message sig
+    local text_hash msg sig
     text_hash=$(python3 -c "import hashlib; print(hashlib.sha256(b'e2e task $NONCE \x00 salt').hexdigest())")
-    payload=$(participant register-payload "$text_hash" "$DURATION")
-    message=$(participant task-message solana-devnet "$GAME_ID" "$task_id" 0 "$payload")
-    sig=$(participant sol-sign "$SOL_DONOR_KEYPAIR" "$message")
+    msg=$(mktemp); trap 'rm -f "$msg"' RETURN
+    participant task-message solana-devnet "$GAME_ID" "$task_id" register "$text_hash" "$DURATION" > "$msg"
+    sig=$(participant sol-sign "$SOL_DONOR_KEYPAIR" "$msg")
     game_call register_task "(record {
         chain = \"solana-devnet\";
         donor = blob \"$(blob_hex "$DONOR_HEX")\";
@@ -186,9 +190,10 @@ register_task() { # gross deadline task_id_hex nonce
         signature = blob \"$(blob_hex "$sig")\" })" | tee /dev/stderr | grep -q Ok
 }
 vote_done() { # task_id_hex
-    local task_id=$1 message sig
-    message=$(participant task-message solana-devnet "$GAME_ID" "$task_id" 4 "00")
-    sig=$(participant sol-sign "$SOL_DONOR_KEYPAIR" "$message")
+    local task_id=$1 msg sig
+    msg=$(mktemp); trap 'rm -f "$msg"' RETURN
+    participant task-message solana-devnet "$GAME_ID" "$task_id" vote done > "$msg"
+    sig=$(participant sol-sign "$SOL_DONOR_KEYPAIR" "$msg")
     game_call vote "(record { chain = \"solana-devnet\"; task_id = blob \"$(blob_hex "$task_id")\";
         voter = blob \"$(blob_hex "$DONOR_HEX")\"; choice = variant { done };
         signature = blob \"$(blob_hex "$sig")\" })" | tee /dev/stderr | grep -q Ok
@@ -207,7 +212,7 @@ B=$(driver create "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$STREAMER" "$B_GROSS" "$D
 B_HEX=$(b58_hex "$B")
 echo "escrow B=$B"
 register_task "$B_GROSS" "$DEADLINE" "$B_HEX" "$NONCE"
-sign_and_call decline "$B_HEX" 2 "" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
+sign_and_call decline "$B_HEX" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
 
 SIG_B=""
 for _ in $(seq 1 20); do
@@ -248,8 +253,8 @@ A=$(driver create "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$STREAMER" "$A_GROSS" "$D
 A_HEX=$(b58_hex "$A")
 echo "escrow A=$A"
 register_task "$A_GROSS" "$DEADLINE" "$A_HEX" $((NONCE + 2))
-sign_and_call accept "$A_HEX" 1 "" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
-sign_and_call done "$A_HEX" 3 "" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
+sign_and_call accept "$A_HEX" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
+sign_and_call done "$A_HEX" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
 VOTING_STARTED=$(date +%s)
 vote_done "$A_HEX"
 
