@@ -15,6 +15,9 @@ threshold_key = "key_1"
 # Сжатые часы devnet: голосование 2 минуты. Прод-значение — час,
 # в mainnet.toml; задание несёт свой период с рождения.
 voting_period = 120
+# Кошелёк оператора платформы (game-spec §9): единственная его власть —
+# принудить возврат донору. На devnet — ключ из ~/.cache/crown-e2e/operator.json.
+operator_wallet = "9KggtYo5QpWgZLCfQCJx3uuEMRrHmjhRnZRGq15AjCKt"
 
 [[chain]]
 id        = "solana-devnet"

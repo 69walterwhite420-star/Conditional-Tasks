@@ -10,7 +10,7 @@ use crate::vote::{MIN_VOTE_WEIGHT, Vote};
 
 /// Version of the game rules. Bumped only by a conscious change to the
 /// machine or the verdict rule; the canister reports it via query.
-pub const LOGIC_VERSION: u32 = 1;
+pub const LOGIC_VERSION: u32 = 2;
 
 /// All times are unix seconds; time is always an argument, never a syscall.
 /// The voting period is a birth parameter of the task (profile-scoped in the
@@ -68,6 +68,10 @@ pub enum Action {
     Done,
     /// A reputation holder votes.
     Vote(Vote),
+    /// The platform operator forces the refund verdict — the censorship
+    /// move. Its only power is returning the donor's own money: allowed
+    /// from any state the clock has not yet decided, never out of Decided.
+    OperatorRefund,
     /// Pure time: due transitions only.
     Tick,
 }
@@ -146,6 +150,11 @@ pub fn step(task: &mut Task, action: Action, now: u64) -> Result<(), StepError> 
             })
         }
         (State::Accepted, Action::Done) => Some(State::Voting { started_at: now }),
+        (State::Created, Action::OperatorRefund)
+        | (State::Accepted, Action::OperatorRefund)
+        | (State::Voting { .. }, Action::OperatorRefund) => Some(State::Decided {
+            outcome: Outcome::Cancel,
+        }),
         (State::Voting { .. }, Action::Vote(vote)) => {
             if vote.weight < MIN_VOTE_WEIGHT {
                 return Err(StepError::WeightBelowThreshold);
@@ -171,7 +180,8 @@ pub fn step(task: &mut Task, action: Action, now: u64) -> Result<(), StepError> 
         | (State::Decided { .. }, Action::Accept)
         | (State::Decided { .. }, Action::Decline)
         | (State::Decided { .. }, Action::Done)
-        | (State::Decided { .. }, Action::Vote(_)) => {
+        | (State::Decided { .. }, Action::Vote(_))
+        | (State::Decided { .. }, Action::OperatorRefund) => {
             return Err(StepError::InvalidTransition);
         }
     };
@@ -278,6 +288,7 @@ mod tests {
             Just(Action::Accept),
             Just(Action::Decline),
             Just(Action::Done),
+            Just(Action::OperatorRefund),
             Just(Action::Tick),
             (0u8..4, any::<bool>(), 0u128..=u128::from(u64::MAX)).prop_map(
                 |(voter, done, weight)| {
@@ -359,21 +370,36 @@ mod tests {
                 Action::Decline,
                 Action::Done,
                 Action::Vote(valid_vote(0, Choice::Done)),
+                Action::OperatorRefund,
                 Action::Tick,
             ]
         };
         let cases: Vec<(Task, Vec<Action>)> = vec![
             (
                 created(),
-                vec![Action::Accept, Action::Decline, Action::Tick],
+                vec![
+                    Action::Accept,
+                    Action::Decline,
+                    Action::OperatorRefund,
+                    Action::Tick,
+                ],
             ),
             (
                 accepted(),
-                vec![Action::Decline, Action::Done, Action::Tick],
+                vec![
+                    Action::Decline,
+                    Action::Done,
+                    Action::OperatorRefund,
+                    Action::Tick,
+                ],
             ),
             (
                 voting(),
-                vec![Action::Vote(valid_vote(0, Choice::Done)), Action::Tick],
+                vec![
+                    Action::Vote(valid_vote(0, Choice::Done)),
+                    Action::OperatorRefund,
+                    Action::Tick,
+                ],
             ),
             (decided(), vec![Action::Tick]),
         ];
@@ -461,6 +487,66 @@ mod tests {
             task.state,
             State::Decided {
                 outcome: Outcome::Cancel
+            }
+        );
+    }
+
+    // ---- operator -------------------------------------------------------
+
+    #[test]
+    fn operator_refund_cancels_every_live_state() {
+        // CREATED, ACCEPTED and VOTING all collapse to Cancel; recorded
+        // votes stay published.
+        let mut task = fresh();
+        step(&mut task, Action::OperatorRefund, T0 + 1).unwrap();
+        assert_eq!(
+            task.state,
+            State::Decided {
+                outcome: Outcome::Cancel
+            }
+        );
+
+        let mut task = fresh();
+        step(&mut task, Action::Accept, T0 + 1).unwrap();
+        step(&mut task, Action::OperatorRefund, T0 + 2).unwrap();
+        assert_eq!(
+            task.state,
+            State::Decided {
+                outcome: Outcome::Cancel
+            }
+        );
+
+        let mut task = fresh();
+        step(&mut task, Action::Accept, T0 + 1).unwrap();
+        step(&mut task, Action::Done, T0 + 2).unwrap();
+        step(&mut task, Action::Vote(valid_vote(0, Choice::Done)), T0 + 3).unwrap();
+        step(&mut task, Action::OperatorRefund, T0 + 4).unwrap();
+        assert_eq!(
+            task.state,
+            State::Decided {
+                outcome: Outcome::Cancel
+            }
+        );
+        assert_eq!(task.votes.len(), 1);
+    }
+
+    #[test]
+    fn operator_refund_never_beats_the_clock() {
+        // A voting window that already ended tallies first; the operator
+        // cannot flip the tallied settle.
+        let mut task = fresh();
+        step(&mut task, Action::Accept, T0 + 1).unwrap();
+        step(&mut task, Action::Done, T0 + 2).unwrap();
+        step(&mut task, Action::Vote(valid_vote(0, Choice::Done)), T0 + 3).unwrap();
+        let end = T0 + 2 + VOTING_PERIOD;
+        assert_eq!(
+            step(&mut task, Action::OperatorRefund, end),
+            Err(StepError::InvalidTransition)
+        );
+        assert_eq!(
+            task.state,
+            State::Decided {
+                outcome: Outcome::Settle
             }
         );
     }
@@ -647,6 +733,6 @@ mod tests {
     // The rules are versioned; changing semantics without bumping is a bug.
     #[test]
     fn logic_version_is_pinned() {
-        assert_eq!(LOGIC_VERSION, 1);
+        assert_eq!(LOGIC_VERSION, 2);
     }
 }

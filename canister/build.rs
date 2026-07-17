@@ -38,6 +38,7 @@ fn main() {
         .unwrap_or_else(|| panic!("config/{profile}.toml: no threshold_key"));
     let voting_period = value_of_opt(head, "voting_period")
         .unwrap_or_else(|| panic!("config/{profile}.toml: no voting_period"));
+    let operator_wallet = value_of_opt(head, "operator_wallet").unwrap_or_default();
 
     let mut chains = String::new();
     for block in toml.split("[[chain]]").skip(1) {
@@ -68,6 +69,8 @@ fn main() {
              pub const THRESHOLD_KEY: &str = {threshold_key:?};\n\
              /// Voting window in seconds; the prod value lives in mainnet.toml.\n\
              pub const VOTING_PERIOD: u64 = {voting_period};\n\
+             /// The platform operator's wallet; empty until a real deploy pins it.\n\
+             pub const OPERATOR_WALLET: &str = {operator_wallet:?};\n\
              /// Chain table from config/{profile}.toml.\n\
              pub const CHAINS: &[ChainSpec] = &[\n{chains}];\n"
         ),

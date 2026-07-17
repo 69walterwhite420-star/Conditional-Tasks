@@ -72,10 +72,20 @@ pub fn resolver(pic: &PocketIc, canister: Principal) -> Vec<u8> {
     resolver.expect("resolver key ready").into_vec()
 }
 
+/// The operator wallet every test instance is installed with, via the init
+/// override — the baked testnet key's secret lives outside the repo.
+pub fn operator() -> Wallet {
+    wallet(0xE0)
+}
+
 /// A game canister with no book behind it (G2 surface).
 pub fn setup() -> (PocketIc, Principal) {
     let (pic, canister) = new_instance();
-    pic.install_canister(canister, game_wasm(), Encode!().unwrap(), None);
+    let overrides = conditional_tasks::Overrides {
+        crown_index: None,
+        operator_wallet: Some(ByteBuf::from(operator().address)),
+    };
+    pic.install_canister(canister, game_wasm(), Encode!(&Some(overrides)).unwrap(), None);
     warm_up(&pic, canister);
     (pic, canister)
 }
@@ -95,6 +105,7 @@ pub fn setup_with_index() -> (PocketIc, Principal, Principal) {
 
     let overrides = conditional_tasks::Overrides {
         crown_index: Some(index),
+        operator_wallet: Some(ByteBuf::from(operator().address)),
     };
     pic.install_canister(game, game_wasm(), Encode!(&Some(overrides)).unwrap(), None);
     warm_up(&pic, game);

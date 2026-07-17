@@ -44,6 +44,7 @@ pub(crate) const TASKS_MEMORY: MemoryId = MemoryId::new(0);
 pub(crate) const CHANNELS_MEMORY: MemoryId = MemoryId::new(1);
 pub(crate) const CROWN_INDEX_MEMORY: MemoryId = MemoryId::new(2);
 pub(crate) const SCHNORR_KEY_MEMORY: MemoryId = MemoryId::new(3);
+pub(crate) const OPERATOR_WALLET_MEMORY: MemoryId = MemoryId::new(4);
 
 /// The timer only backstops "time first" inside every step: a late tick can
 /// delay a due transition, never corrupt it.
@@ -69,6 +70,11 @@ thread_local! {
     /// deploys, where the baked config value is the only authority.
     static CROWN_INDEX_OVERRIDE: RefCell<StableCell<Vec<u8>, Memory>> =
         RefCell::new(StableCell::init(memory(CROWN_INDEX_MEMORY), Vec::new()));
+
+    /// Local-testing override of the operator wallet; empty on real deploys,
+    /// where the baked config value is the only authority.
+    static OPERATOR_WALLET_OVERRIDE: RefCell<StableCell<Vec<u8>, Memory>> =
+        RefCell::new(StableCell::init(memory(OPERATOR_WALLET_MEMORY), Vec::new()));
 
     /// Cached threshold public key (ed25519); fetched by the timer once and
     /// then immutable — the key derives from canister_id.
@@ -147,6 +153,10 @@ pub struct TaskRecord {
     /// The threshold signature of the recorded verdict; appears once, soon
     /// after the decision, and never changes (game-spec §8).
     pub verdict_signature: Option<serde_bytes::ByteBuf>,
+    /// Set exactly when the cancel verdict was forced by the platform
+    /// operator (game-spec §9) — the censorship move, attributed forever.
+    /// `None` on every other path to a verdict.
+    pub operator_refunded_at: Option<u64>,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -392,6 +402,18 @@ pub(crate) fn crown_index() -> Option<candid::Principal> {
     CROWN_INDEX_OVERRIDE.with_borrow(|cell| weight::resolve(cell.get(), CROWN_INDEX))
 }
 
+/// The operator wallet: the override if set, else the baked config value.
+/// `None` while neither pins one — then no operator refund exists.
+pub(crate) fn operator_wallet() -> Option<[u8; 32]> {
+    let stored = OPERATOR_WALLET_OVERRIDE.with_borrow(|cell| cell.get().clone());
+    let bytes = if stored.is_empty() {
+        bs58::decode(OPERATOR_WALLET).into_vec().ok()?
+    } else {
+        stored
+    };
+    bytes.try_into().ok()
+}
+
 // ---- lifecycle ---------------------------------------------------------------
 
 /// Local-testing overrides, for replicas where the real crown-index does not
@@ -399,6 +421,7 @@ pub(crate) fn crown_index() -> Option<candid::Principal> {
 #[derive(CandidType, Deserialize)]
 pub struct Overrides {
     pub crown_index: Option<candid::Principal>,
+    pub operator_wallet: Option<serde_bytes::ByteBuf>,
 }
 
 #[ic_cdk::init]
@@ -412,6 +435,12 @@ fn init(overrides: Option<Overrides>) {
         }
         if let Some(principal) = overrides.crown_index {
             CROWN_INDEX_OVERRIDE.with_borrow_mut(|cell| cell.set(principal.as_slice().to_vec()));
+        }
+        if let Some(wallet) = overrides.operator_wallet {
+            if wallet.len() != 32 {
+                ic_cdk::trap("operator wallet override: not 32 bytes");
+            }
+            OPERATOR_WALLET_OVERRIDE.with_borrow_mut(|cell| cell.set(wallet.into_vec()));
         }
     }
     certify::recertify();

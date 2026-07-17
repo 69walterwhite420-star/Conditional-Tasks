@@ -34,7 +34,7 @@ if grep -rn 'http_request' canister/src/; then
 fi
 
 # 5. the update surface is frozen: every non-query .did method is allowlisted.
-allow='register_task|accept|decline|done|vote|set_channel_params'
+allow='register_task|accept|decline|done|vote|set_channel_params|operator_refund'
 if grep '\->' canister/conditional-tasks.did | grep -v 'service :' | grep -v 'query' \
     | grep -vE "^[[:space:]]*($allow)[[:space:]]*:"; then
     echo "FAIL: update method outside the allowlist in conditional-tasks.did" >&2

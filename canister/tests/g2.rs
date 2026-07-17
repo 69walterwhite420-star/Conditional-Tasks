@@ -432,3 +432,149 @@ fn channel_params_counter_and_floor() {
     let error = register(&pic, canister, &donor, &streamer.address, 2).unwrap_err();
     assert_eq!(error, "channel disabled");
 }
+
+#[test]
+#[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
+fn operator_refund_cancels_and_attributes() {
+    let (pic, canister) = setup();
+    let donor = wallet(1);
+    let streamer = wallet(2);
+
+    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    streamer_call(
+        &pic,
+        canister,
+        "operator_refund",
+        auth::Action::OperatorRefund,
+        &r.task_id,
+        &operator(),
+    )
+    .unwrap();
+    let task = fetch_task(&pic, canister, &r.task_id);
+    let record = task_state(&task);
+    assert_eq!(
+        record.state,
+        conditional_tasks::StateView::Decided {
+            outcome: conditional_tasks::OutcomeView::Cancel
+        }
+    );
+    // Attributed forever: this cancel names the operator, not the streamer.
+    assert!(record.operator_refunded_at.is_some());
+    verify_certified_task(&pic, canister, &task);
+
+    // The cancel signature arrives by the ordinary sweep — no special path.
+    let mut signed = false;
+    for _ in 0..40 {
+        pic.advance_time(std::time::Duration::from_secs(1));
+        pic.tick();
+        if task_state(&fetch_task(&pic, canister, &r.task_id))
+            .verdict_signature
+            .is_some()
+        {
+            signed = true;
+            break;
+        }
+    }
+    assert!(signed, "verdict signature never swept");
+
+    // Replay is a no-op on the dead task; the attribution stays.
+    let error = streamer_call(
+        &pic,
+        canister,
+        "operator_refund",
+        auth::Action::OperatorRefund,
+        &r.task_id,
+        &operator(),
+    )
+    .unwrap_err();
+    assert_eq!(error, "invalid transition");
+    assert!(
+        task_state(&fetch_task(&pic, canister, &r.task_id))
+            .operator_refunded_at
+            .is_some()
+    );
+}
+
+#[test]
+#[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
+fn operator_refund_works_mid_voting() {
+    let (pic, canister) = setup();
+    let donor = wallet(1);
+    let streamer = wallet(2);
+
+    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    streamer_call(
+        &pic,
+        canister,
+        "accept",
+        auth::Action::Accept,
+        &r.task_id,
+        &streamer,
+    )
+    .unwrap();
+    streamer_call(
+        &pic,
+        canister,
+        "done",
+        auth::Action::Done,
+        &r.task_id,
+        &streamer,
+    )
+    .unwrap();
+
+    // VOTING is closed to the streamer's decline but open to the operator.
+    let error = streamer_call(
+        &pic,
+        canister,
+        "decline",
+        auth::Action::Decline,
+        &r.task_id,
+        &streamer,
+    )
+    .unwrap_err();
+    assert_eq!(error, "invalid transition");
+    streamer_call(
+        &pic,
+        canister,
+        "operator_refund",
+        auth::Action::OperatorRefund,
+        &r.task_id,
+        &operator(),
+    )
+    .unwrap();
+    let record = task_state(&fetch_task(&pic, canister, &r.task_id));
+    assert_eq!(
+        record.state,
+        conditional_tasks::StateView::Decided {
+            outcome: conditional_tasks::OutcomeView::Cancel
+        }
+    );
+    assert!(record.operator_refunded_at.is_some());
+}
+
+#[test]
+#[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
+fn operator_refund_rejects_foreign_wallets() {
+    let (pic, canister) = setup();
+    let donor = wallet(1);
+    let streamer = wallet(2);
+
+    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    // Neither the streamer nor a stranger holds the operator's pen.
+    for signer in [&streamer, &wallet(9)] {
+        let error = streamer_call(
+            &pic,
+            canister,
+            "operator_refund",
+            auth::Action::OperatorRefund,
+            &r.task_id,
+            signer,
+        )
+        .unwrap_err();
+        assert_eq!(error, "bad signature");
+    }
+    // The rejected calls left the machine untouched.
+    let record = task_state(&fetch_task(&pic, canister, &r.task_id));
+    assert_eq!(record.state, conditional_tasks::StateView::Created);
+    assert!(record.operator_refunded_at.is_none());
+}

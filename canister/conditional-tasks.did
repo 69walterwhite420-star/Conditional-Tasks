@@ -1,6 +1,6 @@
 // Update surface is frozen: only {register_task, accept, decline, done,
-// vote, set_channel_params} may ever appear as non-query methods; the CI
-// lint fails on anything else.
+// vote, set_channel_params, operator_refund} may ever appear as non-query
+// methods; the CI lint fails on anything else.
 
 type Outcome = variant { settle; cancel };
 type State = variant {
@@ -27,6 +27,9 @@ type Task = record {
   state : State;
   votes : vec Vote;
   verdict_signature : opt blob;
+  // Present exactly when the cancel verdict was forced by the platform
+  // operator; attribution, certified forever.
+  operator_refunded_at : opt nat64;
 };
 type Channel = record {
   min_gross : nat64;
@@ -79,7 +82,10 @@ type ChannelArg = record {
 type RegisterResult = variant { Ok : blob; Err : text };
 type ActionResult = variant { Ok; Err : text };
 // Local-testing overrides; a mainnet-profile build traps on them.
-type Overrides = record { crown_index : opt principal };
+type Overrides = record {
+  crown_index : opt principal;
+  operator_wallet : opt blob;
+};
 
 service : (opt Overrides) -> {
 
@@ -89,6 +95,7 @@ service : (opt Overrides) -> {
   done : (ActionArg) -> (ActionResult);
   vote : (VoteArg) -> (ActionResult);
   set_channel_params : (ChannelArg) -> (ActionResult);
+  operator_refund : (ActionArg) -> (ActionResult);
   get_task : (text, blob) -> (opt CertifiedTask) query;
   list_tasks : (text, blob) -> (vec blob) query;
   get_channel : (text, blob) -> (opt Channel) query;

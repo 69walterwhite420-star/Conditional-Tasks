@@ -45,6 +45,7 @@ pub enum Action<'a> {
     Decline,
     Done,
     Vote(Choice),
+    OperatorRefund,
 }
 
 impl Action<'_> {
@@ -56,6 +57,7 @@ impl Action<'_> {
             Action::Decline => "decline",
             Action::Done => "done",
             Action::Vote(_) => "vote",
+            Action::OperatorRefund => "operator-refund",
         }
     }
 }
@@ -134,7 +136,7 @@ pub fn task_message(chain: &str, canister_id: &str, task_id: &[u8], action: &Act
             out.push_str(&format!("duration: {duration}\n"));
         }
         Action::Vote(choice) => out.push_str(&format!("choice: {}\n", choice.word())),
-        Action::Accept | Action::Decline | Action::Done => {}
+        Action::Accept | Action::Decline | Action::Done | Action::OperatorRefund => {}
     }
     out
 }
@@ -247,6 +249,15 @@ pub fn derive_task_id(
 /// Deploy-time validation: every baked chain entry must parse. A canister
 /// with a malformed config must not exist.
 pub fn validate_config() -> Result<(), AuthError> {
+    // The operator wallet is empty until a real deploy pins it (like the
+    // book principal); non-empty it must be a valid address.
+    if !crate::OPERATOR_WALLET.is_empty() {
+        bs58::decode(crate::OPERATOR_WALLET)
+            .into_vec()
+            .ok()
+            .filter(|b| b.len() == 32)
+            .ok_or(AuthError::MalformedConfig)?;
+    }
     for (i, spec) in crate::CHAINS.iter().enumerate() {
         bs58::decode(spec.factory)
             .into_vec()
@@ -376,6 +387,25 @@ mod tests {
     }
 
     #[test]
+    fn operator_refund_message_is_pinned() {
+        assert_eq!(
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::OperatorRefund
+            ),
+            format!(
+                "crown:conditional-tasks:v1\n\
+                 action: operator-refund\n\
+                 chain: solana-devnet\n\
+                 canister: {CANISTER}\n\
+                 task: {TASK_B58}\n"
+            )
+        );
+    }
+
+    #[test]
     fn channel_message_is_pinned() {
         assert_eq!(
             channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 7),
@@ -403,6 +433,12 @@ mod tests {
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Accept),
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Decline),
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Done),
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::OperatorRefund,
+            ),
             task_message(
                 "solana-devnet",
                 CANISTER,
@@ -447,6 +483,12 @@ mod tests {
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Accept),
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Decline),
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Done),
+            task_message(
+                "solana-devnet",
+                CANISTER,
+                &[0xCC; 32],
+                &Action::OperatorRefund,
+            ),
             task_message(
                 "solana-devnet",
                 CANISTER,

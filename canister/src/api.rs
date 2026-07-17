@@ -144,6 +144,7 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
         state: crate::state_to_view(&task.state),
         votes: Vec::new(),
         verdict_signature: None,
+        operator_refunded_at: None,
     };
     record.absorb(&task);
     crate::save_task(&record);
@@ -170,6 +171,37 @@ fn decline(arg: ActionArg) -> Result<(), String> {
 #[ic_cdk::update]
 fn done(arg: ActionArg) -> Result<(), String> {
     streamer_action(arg, logic::Action::Done, auth::Action::Done)
+}
+
+/// The platform operator's censorship move (game-spec §9): forces the
+/// cancel verdict on any task the clock has not decided yet. The only
+/// power is returning the donor's own money — settle has no such door.
+/// Attributed forever in the certified record; the text takedown is the
+/// server's own half of the same button.
+#[ic_cdk::update]
+fn operator_refund(arg: ActionArg) -> Result<(), String> {
+    let key = crate::task_key(&arg.chain, &arg.task_id);
+    let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
+
+    let operator = crate::operator_wallet().ok_or("no operator wallet configured")?;
+    let message = auth::task_message(
+        &arg.chain,
+        &canister_id(),
+        &arg.task_id,
+        &auth::Action::OperatorRefund,
+    );
+    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &operator)
+        .map_err(|e| e.text().to_string())?;
+
+    let now = crate::now_seconds();
+    let mut task = record.to_logic();
+    let result = logic::step(&mut task, logic::Action::OperatorRefund, now);
+    record.absorb(&task);
+    if result.is_ok() {
+        record.operator_refunded_at = Some(now);
+    }
+    crate::save_task(&record);
+    result.map_err(step_error_text)
 }
 
 #[derive(CandidType, Deserialize)]
