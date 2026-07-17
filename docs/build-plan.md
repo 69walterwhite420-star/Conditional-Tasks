@@ -21,7 +21,7 @@
 
 **Ядро и фабрика в этом плане не участвуют.** Оба готовы в devnet-объёме (S0–S3, F0–F3, `factories[]` пиннуты) и не трогаются ни одной строкой.
 
-**Дополнение от 2026-07-17:** операторский возврат (game-spec §9) — подпись кошелька из `operator_wallet` конфига фиксирует `cancel` до вердикта; атрибуция `operator_refunded_at` сертифицирована. `LOGIC_VERSION` 2. Ончейн-программы, соль, `.did`-типы клиентов — не тронуты; апгрейд канистры совместим (поле `opt`, старые записи читаются).
+Операторский возврат (game-spec §9): подпись кошелька из `operator_wallet` фиксирует `cancel` до вердикта, атрибуция `operator_refunded_at` сертифицирована; `LOGIC_VERSION` = 2.
 
 Всё, что не в таблице, — в `post-game.md`. Не строим. Не готовим место. Не оставляем хуков.
 
@@ -40,7 +40,7 @@
 2. `grep -rE 'ic_cdk|std::(fs|net|time)|reqwest' logic/src/` → пусто.
 3. `grep -riE 'solana|ed25519|sha256|candid' logic/src/` → пусто. Логика не знает про чейн и криптографию.
 4. `grep -riE 'transfer|approve|splitter|treasury' canister/src/` → пусто; `grep -r 'http_request' canister/src/` → пусто. Канистра не двигает деньги и не читает внешние сети.
-5. Парсер `.did`: update-методы — ровно `{register_task, accept, decline, done, vote, set_channel_params}`. Любой сверх списка роняет CI.
+5. Парсер `.did`: update-методы — ровно `{register_task, accept, decline, done, vote, set_channel_params, operator_refund}`. Любой сверх списка роняет CI.
 
 **DoD.** Дерево совпадает с картой в `CLAUDE.md`. Пять линтов зелёные на пустом репозитории. Ни одного сетевого значения, адреса или principal в коде.
 

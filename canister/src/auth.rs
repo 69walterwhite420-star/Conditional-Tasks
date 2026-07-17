@@ -62,8 +62,7 @@ impl Action<'_> {
     }
 }
 
-/// Lowercase hex. `hex` is a dev-dependency only, and one line of code is
-/// cheaper than making it a runtime one.
+/// Lowercase hex.
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
