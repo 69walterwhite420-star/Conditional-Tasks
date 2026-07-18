@@ -21,11 +21,11 @@ fn step_error_text(error: logic::StepError) -> String {
 
 fn register_error_text(error: logic::RegisterError) -> String {
     match error {
-        logic::RegisterError::ChannelDisabled => "channel disabled",
+        logic::RegisterError::ProfileDisabled => "profile disabled",
         logic::RegisterError::GrossBelowFloor => "gross below the shape floor",
-        logic::RegisterError::GrossBelowChannelMinimum => "gross below the channel minimum",
+        logic::RegisterError::GrossBelowMinimum => "gross below the profile minimum",
         logic::RegisterError::ReputationBelowMinimum => {
-            "donor reputation below the channel minimum"
+            "donor reputation below the profile minimum"
         }
         logic::RegisterError::DurationOutOfRange => "duration out of range",
         logic::RegisterError::DeadlineTooTight => "deadline too tight",
@@ -45,7 +45,7 @@ fn canister_id() -> String {
 pub struct RegisterArg {
     pub chain: String,
     pub donor: ByteBuf,
-    pub streamer: ByteBuf,
+    pub recipient: ByteBuf,
     pub gross: u64,
     pub deadline: u64,
     pub resolver: ByteBuf,
@@ -57,8 +57,8 @@ pub struct RegisterArg {
 
 /// Registers a task: derives task_id from the declared birth fields, checks
 /// the donor's signature over (task_id, text commitment, duration), validates
-/// against the channel knobs and births the machine in CREATED. Channels
-/// that demand reputation read the donor's book value from crown-index.
+/// against the profile parameters and births the machine in CREATED. Profiles
+/// that demand reputation read the donor's reputation from crown-index.
 #[ic_cdk::update]
 async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
     let spec = auth::spec_of(&arg.chain).map_err(|e| e.text().to_string())?;
@@ -68,7 +68,7 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
     let task_id = auth::derive_task_id(
         spec,
         &arg.donor,
-        &arg.streamer,
+        &arg.recipient,
         arg.gross,
         arg.deadline,
         &arg.resolver,
@@ -98,9 +98,9 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
     auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &arg.donor)
         .map_err(|e| e.text().to_string())?;
 
-    let channel = crate::load_channel(&arg.chain, &arg.streamer, spec.min_gross);
-    let donor_reputation = if channel.min_reputation > 0 {
-        crate::weight::book_value(&arg.chain, &arg.donor, &arg.streamer).await?
+    let profile = crate::load_profile(&arg.chain, &arg.recipient, spec.min_gross);
+    let donor_reputation = if profile.min_reputation > 0 {
+        crate::weight::reputation(&arg.chain, &arg.donor, &arg.recipient).await?
     } else {
         0
     };
@@ -112,10 +112,10 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
     let now = crate::now_seconds();
     let task = logic::register(
         now,
-        &logic::ChannelParams {
-            min_gross: channel.min_gross,
-            min_reputation: channel.min_reputation,
-            enabled: channel.enabled,
+        &logic::ProfileParams {
+            min_gross: profile.min_gross,
+            min_reputation: profile.min_reputation,
+            enabled: profile.enabled,
         },
         spec.min_gross,
         crate::VOTING_PERIOD,
@@ -132,7 +132,7 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
         chain: arg.chain,
         task_id: ByteBuf::from(task_id.clone()),
         donor: arg.donor,
-        streamer: arg.streamer,
+        recipient: arg.recipient,
         gross: arg.gross,
         deadline: arg.deadline,
         resolver: arg.resolver,
@@ -160,17 +160,17 @@ pub struct ActionArg {
 
 #[ic_cdk::update]
 fn accept(arg: ActionArg) -> Result<(), String> {
-    streamer_action(arg, logic::Action::Accept, auth::Action::Accept)
+    recipient_action(arg, logic::Action::Accept, auth::Action::Accept)
 }
 
 #[ic_cdk::update]
 fn decline(arg: ActionArg) -> Result<(), String> {
-    streamer_action(arg, logic::Action::Decline, auth::Action::Decline)
+    recipient_action(arg, logic::Action::Decline, auth::Action::Decline)
 }
 
 #[ic_cdk::update]
 fn done(arg: ActionArg) -> Result<(), String> {
-    streamer_action(arg, logic::Action::Done, auth::Action::Done)
+    recipient_action(arg, logic::Action::Done, auth::Action::Done)
 }
 
 /// The platform operator's censorship move (game-spec §9): forces the
@@ -256,7 +256,7 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
         return Err("duplicate voter".to_string());
     }
 
-    let weight = crate::weight::book_value(&arg.chain, &arg.voter, &record.streamer).await?;
+    let weight = crate::weight::reputation(&arg.chain, &arg.voter, &record.recipient).await?;
 
     // The await yielded: reload the truth and let the machine judge. Persist
     // only a real change — a rejected vote must not cost a certified write.
@@ -282,10 +282,10 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
     result.map_err(step_error_text)
 }
 
-/// The three streamer moves share one path: load, verify the streamer's
+/// The three recipient moves share one path: load, verify the recipient's
 /// signature over (task, action), step the machine. Time transitions that
 /// became due persist even when the action itself is rejected.
-fn streamer_action(
+fn recipient_action(
     arg: ActionArg,
     action: logic::Action,
     signed: auth::Action<'_>,
@@ -294,7 +294,7 @@ fn streamer_action(
     let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
 
     let message = auth::task_message(&arg.chain, &canister_id(), &arg.task_id, &signed);
-    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &record.streamer)
+    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &record.recipient)
         .map_err(|e| e.text().to_string())?;
 
     let mut task = record.to_logic();
@@ -305,9 +305,9 @@ fn streamer_action(
 }
 
 #[derive(CandidType, Deserialize)]
-pub struct ChannelArg {
+pub struct ProfileArg {
     pub chain: String,
-    pub streamer: ByteBuf,
+    pub recipient: ByteBuf,
     pub min_gross: u64,
     pub min_reputation: u128,
     pub enabled: bool,
@@ -315,33 +315,33 @@ pub struct ChannelArg {
     pub signature: ByteBuf,
 }
 
-/// Streamer knobs. The counter must strictly grow — an old signature can
+/// Recipient parameters. The counter must strictly grow — an old signature can
 /// never be replayed. Changes affect future registrations only.
 #[ic_cdk::update]
-fn set_channel_params(arg: ChannelArg) -> Result<(), String> {
+fn set_profile(arg: ProfileArg) -> Result<(), String> {
     let spec = auth::spec_of(&arg.chain).map_err(|e| e.text().to_string())?;
     if arg.min_gross < spec.min_gross {
-        return Err("channel minimum below the shape floor".to_string());
+        return Err("profile minimum below the shape floor".to_string());
     }
-    let current = crate::load_channel(&arg.chain, &arg.streamer, spec.min_gross);
+    let current = crate::load_profile(&arg.chain, &arg.recipient, spec.min_gross);
     if arg.counter <= current.counter {
         return Err("stale counter".to_string());
     }
-    let message = auth::channel_message(
+    let message = auth::profile_message(
         &arg.chain,
         &canister_id(),
-        &arg.streamer,
+        &arg.recipient,
         arg.min_gross,
         arg.min_reputation,
         arg.enabled,
         arg.counter,
     );
-    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &arg.streamer)
+    auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &arg.recipient)
         .map_err(|e| e.text().to_string())?;
     crate::save_channel(
         &arg.chain,
-        &arg.streamer,
-        &crate::ChannelRecord {
+        &arg.recipient,
+        &crate::ProfileRecord {
             min_gross: arg.min_gross,
             min_reputation: arg.min_reputation,
             enabled: arg.enabled,
@@ -374,17 +374,17 @@ fn get_task(chain: String, task_id: ByteBuf) -> Option<CertifiedTask> {
 }
 
 #[ic_cdk::query]
-fn list_tasks(chain: String, streamer: ByteBuf) -> Vec<ByteBuf> {
-    crate::tasks_of_streamer(&chain, &streamer)
+fn list_tasks(chain: String, recipient: ByteBuf) -> Vec<ByteBuf> {
+    crate::tasks_of_recipient(&chain, &recipient)
         .into_iter()
         .map(ByteBuf::from)
         .collect()
 }
 
 #[ic_cdk::query]
-fn get_channel(chain: String, streamer: ByteBuf) -> Option<crate::ChannelRecord> {
+fn get_profile(chain: String, recipient: ByteBuf) -> Option<crate::ProfileRecord> {
     let spec = auth::spec_of(&chain).ok()?;
-    Some(crate::load_channel(&chain, &streamer, spec.min_gross))
+    Some(crate::load_profile(&chain, &recipient, spec.min_gross))
 }
 
 /// The verdict and its threshold signature, exactly what a claim

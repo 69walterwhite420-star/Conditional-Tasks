@@ -52,18 +52,18 @@ fn verify_verdict(resolver: &[u8], task_id: &[u8], outcome: u8, signature: &[u8]
 fn cancel_verdict_is_signed_for_the_contract() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let resolver = resolver(&pic, canister);
     assert_eq!(resolver.len(), 32);
 
-    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     streamer_call(
         &pic,
         canister,
         "decline",
         auth::Action::Decline,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
 
@@ -88,19 +88,19 @@ fn cancel_verdict_is_signed_for_the_contract() {
 fn settle_verdict_is_signed_after_votes() {
     let (pic, canister, index) = setup_with_index();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let voter = wallet(3);
     let resolver = resolver(&pic, canister);
-    seed_reputation(&pic, index, &voter.address, &streamer.address, 5_000_000);
+    seed_reputation(&pic, index, &voter.address, &recipient.address, 5_000_000);
 
-    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     streamer_call(
         &pic,
         canister,
         "accept",
         auth::Action::Accept,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
     streamer_call(
@@ -109,7 +109,7 @@ fn settle_verdict_is_signed_after_votes() {
         "done",
         auth::Action::Done,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
 
@@ -155,7 +155,7 @@ fn settle_verdict_is_signed_after_votes() {
 fn foreign_resolver_is_rejected_at_registration() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
     let spec = auth::spec_of(CHAIN).unwrap();
     let now = now_seconds(&pic);
@@ -164,7 +164,7 @@ fn foreign_resolver_is_rejected_at_registration() {
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,
-        &streamer.address,
+        &recipient.address,
         1_000_000,
         deadline,
         &foreign,
@@ -184,7 +184,7 @@ fn foreign_resolver_is_rejected_at_registration() {
     let arg = RegisterArg {
         chain: CHAIN.to_string(),
         donor: ByteBuf::from(donor.address.clone()),
-        streamer: ByteBuf::from(streamer.address.clone()),
+        recipient: ByteBuf::from(recipient.address.clone()),
         gross: 1_000_000,
         deadline,
         resolver: ByteBuf::from(foreign.to_vec()),

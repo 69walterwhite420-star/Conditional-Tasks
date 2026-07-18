@@ -116,13 +116,13 @@ pub fn seed_reputation(
     pic: &PocketIc,
     index: Principal,
     wallet: &[u8],
-    streamer: &[u8],
+    recipient: &[u8],
     value: u128,
 ) {
     let arg = Encode!(
         &CHAIN.to_string(),
         &ByteBuf::from(wallet.to_vec()),
-        &ByteBuf::from(streamer.to_vec()),
+        &ByteBuf::from(recipient.to_vec()),
         &value
     )
     .unwrap();
@@ -189,7 +189,7 @@ pub fn register(
     pic: &PocketIc,
     canister: Principal,
     donor: &Wallet,
-    streamer: &[u8],
+    recipient: &[u8],
     nonce: u64,
 ) -> Result<Registered, String> {
     let spec = auth::spec_of(CHAIN).unwrap();
@@ -200,7 +200,7 @@ pub fn register(
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,
-        streamer,
+        recipient,
         gross,
         deadline,
         &resolver,
@@ -220,7 +220,7 @@ pub fn register(
     let arg = RegisterArg {
         chain: CHAIN.to_string(),
         donor: ByteBuf::from(donor.address.clone()),
-        streamer: ByteBuf::from(streamer.to_vec()),
+        recipient: ByteBuf::from(recipient.to_vec()),
         gross,
         deadline,
         resolver: ByteBuf::from(resolver.to_vec()),

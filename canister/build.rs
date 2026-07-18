@@ -1,6 +1,6 @@
 //! Bakes the selected config profile (config/{testnet|mainnet}.toml, chosen by
 //! CROWN_PROFILE, default testnet) into the wasm as a chain table. The frozen
-//! canister has no runtime config channel; environment swap = profile swap.
+//! canister has no runtime config profile; environment swap = profile swap.
 
 use std::env;
 use std::fs;

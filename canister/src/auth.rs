@@ -140,24 +140,24 @@ pub fn task_message(chain: &str, canister_id: &str, task_id: &[u8], action: &Act
     out
 }
 
-/// The message a streamer signs to change channel knobs. The monotonic
+/// The message a recipient signs to change profile parameters. The monotonic
 /// counter keeps an old signature from being replayed.
 ///
 /// ```text
 /// crown:conditional-tasks:v1
-/// action: set-channel-params
+/// action: set-profile
 /// chain: solana-devnet
 /// canister: vizcg-th777-77774-qaaea-cai
-/// streamer: Gt381v8RqGQUX7vdRbC9NdZCzGuzk6ZUgcTDLfUnYdcJ
+/// recipient: Gt381v8RqGQUX7vdRbC9NdZCzGuzk6ZUgcTDLfUnYdcJ
 /// min_gross: 34
 /// min_reputation: 0
 /// enabled: true
 /// counter: 7
 /// ```
-pub fn channel_message(
+pub fn profile_message(
     chain: &str,
     canister_id: &str,
-    streamer: &[u8],
+    recipient: &[u8],
     min_gross: u64,
     min_reputation: u128,
     enabled: bool,
@@ -166,12 +166,12 @@ pub fn channel_message(
     let mut out = String::new();
     out.push_str(DOMAIN);
     out.push('\n');
-    out.push_str("action: set-channel-params\n");
+    out.push_str("action: set-profile\n");
     out.push_str(&format!("chain: {chain}\n"));
     out.push_str(&format!("canister: {canister_id}\n"));
     out.push_str(&format!(
-        "streamer: {}\n",
-        bs58::encode(streamer).into_string()
+        "recipient: {}\n",
+        bs58::encode(recipient).into_string()
     ));
     out.push_str(&format!("min_gross: {min_gross}\n"));
     out.push_str(&format!("min_reputation: {min_reputation}\n"));
@@ -203,14 +203,14 @@ pub fn verify_wallet_signature(
 pub fn derive_task_id(
     spec: &ChainSpec,
     donor: &[u8],
-    streamer: &[u8],
+    recipient: &[u8],
     gross: u64,
     deadline: u64,
     resolver: &[u8],
     nonce: u64,
 ) -> Result<Vec<u8>, AuthError> {
     let donor: [u8; 32] = donor.try_into().map_err(|_| AuthError::BadFieldLength)?;
-    let streamer: [u8; 32] = streamer.try_into().map_err(|_| AuthError::BadFieldLength)?;
+    let recipient: [u8; 32] = recipient.try_into().map_err(|_| AuthError::BadFieldLength)?;
     let resolver: [u8; 32] = resolver.try_into().map_err(|_| AuthError::BadFieldLength)?;
     // The on-chain program takes deadline as i64; out-of-range is caught here.
     let deadline = i64::try_from(deadline).map_err(|_| AuthError::DeadlineOverflow)?;
@@ -226,7 +226,7 @@ pub fn derive_task_id(
     // `birth_salt`.
     let salt = crown_salt::two_outcome::salt(
         &donor,
-        &streamer,
+        &recipient,
         gross,
         deadline,
         &resolver,
@@ -405,15 +405,15 @@ mod tests {
     }
 
     #[test]
-    fn channel_message_is_pinned() {
+    fn profile_message_is_pinned() {
         assert_eq!(
-            channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 7),
+            profile_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 7),
             format!(
                 "crown:conditional-tasks:v1\n\
-                 action: set-channel-params\n\
+                 action: set-profile\n\
                  chain: solana-devnet\n\
                  canister: {CANISTER}\n\
-                 streamer: {}\n\
+                 recipient: {}\n\
                  min_gross: 34\n\
                  min_reputation: 5\n\
                  enabled: true\n\
@@ -453,7 +453,7 @@ mod tests {
                     duration: u64::MAX,
                 },
             ),
-            channel_message(
+            profile_message(
                 "solana-devnet",
                 CANISTER,
                 &[0xFF; 32],
@@ -532,10 +532,10 @@ mod tests {
                     duration: 300,
                 },
             ),
-            channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 7),
-            channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, false, 7),
-            channel_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 8),
-            channel_message("solana-devnet", CANISTER, &[0x03; 32], 34, 5, true, 7),
+            profile_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 7),
+            profile_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, false, 7),
+            profile_message("solana-devnet", CANISTER, &[0x02; 32], 34, 5, true, 8),
+            profile_message("solana-devnet", CANISTER, &[0x03; 32], 34, 5, true, 7),
         ];
         let count = messages.len();
         for message in messages {
@@ -593,18 +593,18 @@ mod tests {
     }
 
     // Frozen cross-tool vector: salt is sha256 over the exact byte concat,
-    // computed independently with python3 hashlib over donor ‖ streamer ‖
+    // computed independently with python3 hashlib over donor ‖ recipient ‖
     // u64le(1000000) ‖ i64le(1900000000) ‖ resolver ‖ u16le(500) ‖ fee_wallet
     // ‖ u64le(7); the PDA arithmetic itself is parity-tested in crown-derive.
     #[test]
     fn task_id_matches_reference_salt() {
         let donor = [0x11; 32];
-        let streamer = [0x22; 32];
+        let recipient = [0x22; 32];
         let resolver = [0x33; 32];
         let task_id = derive_task_id(
             &spec(),
             &donor,
-            &streamer,
+            &recipient,
             1_000_000,
             1_900_000_000,
             &resolver,
@@ -614,7 +614,7 @@ mod tests {
 
         let mut hasher = Sha256::new();
         hasher.update(donor);
-        hasher.update(streamer);
+        hasher.update(recipient);
         hasher.update(1_000_000u64.to_le_bytes());
         hasher.update(1_900_000_000i64.to_le_bytes());
         hasher.update(resolver);

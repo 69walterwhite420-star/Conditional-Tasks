@@ -9,7 +9,7 @@
 //!   participant task-message <chain> <canister-principal> <task_id_hex> <action> [args]
 //!       action: register <text_hash_hex> <duration> | accept | decline | done
 //!               | vote <done|not_done>
-//!   participant channel-message <chain> <canister> <streamer_hex> <min_gross>
+//!   participant profile-message <chain> <canister> <streamer_hex> <min_gross>
 //!                               <min_reputation> <enabled> <counter>
 //!   participant sol-sign <keypair.json> <message-file>
 //!   participant sol-address <keypair.json>
@@ -62,11 +62,11 @@ fn main() {
             };
             auth::task_message(chain, &canister.to_text(), &task_id, &action)
         }
-        Some("channel-message") => {
+        Some("profile-message") => {
             let [
                 chain,
                 canister,
-                streamer,
+                recipient,
                 min_gross,
                 min_reputation,
                 enabled,
@@ -74,15 +74,15 @@ fn main() {
             ] = &args[2..]
             else {
                 panic!(
-                    "channel-message <chain> <canister> <streamer_hex> <min_gross> \
+                    "profile-message <chain> <canister> <streamer_hex> <min_gross> \
                      <min_reputation> <enabled> <counter>"
                 );
             };
             let canister = Principal::from_text(canister).expect("principal");
-            auth::channel_message(
+            auth::profile_message(
                 chain,
                 &canister.to_text(),
-                &hex_arg(streamer),
+                &hex_arg(recipient),
                 min_gross.parse().expect("min_gross"),
                 min_reputation.parse().expect("min_reputation"),
                 enabled.parse().expect("enabled"),

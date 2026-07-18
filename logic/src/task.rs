@@ -19,10 +19,10 @@ pub const MIN_DURATION: u64 = 60; // 1 minute
 pub const MAX_DURATION: u64 = 2_592_000; // 30 days
 pub const DEADLINE_MARGIN: u64 = 259_200; // 72 hours
 
-/// The streamer's knobs, fixed into a task at registration
+/// The recipient's parameters, fixed into a task at registration
 /// (docs/game-spec.md §7).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChannelParams {
+pub struct ProfileParams {
     pub min_gross: u64,
     pub min_reputation: u128,
     pub enabled: bool,
@@ -60,11 +60,11 @@ pub struct Task {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Streamer takes the task; the text becomes public.
+    /// Recipient takes the task; the text becomes public.
     Accept,
-    /// Streamer bows out — allowed from CREATED and ACCEPTED, costs nothing.
+    /// Recipient bows out — allowed from CREATED and ACCEPTED, costs nothing.
     Decline,
-    /// Streamer claims completion; voting starts.
+    /// Recipient claims completion; voting starts.
     Done,
     /// A reputation holder votes.
     Vote(Vote),
@@ -78,9 +78,9 @@ pub enum Action {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegisterError {
-    ChannelDisabled,
+    ProfileDisabled,
     GrossBelowFloor,
-    GrossBelowChannelMinimum,
+    GrossBelowMinimum,
     ReputationBelowMinimum,
     DurationOutOfRange,
     DeadlineTooTight,
@@ -98,24 +98,24 @@ pub enum StepError {
 
 /// Validates a registration and births the task in CREATED. On `Err` no
 /// task exists. `floor` is the shape's on-chain minimum from the config;
-/// the channel's own `min_gross` may only be stricter.
+/// the profile's own `min_gross` may only be stricter.
 pub fn register(
     now: u64,
-    channel: &ChannelParams,
+    profile: &ProfileParams,
     floor: u64,
     voting_period: u64,
     registration: &Registration,
 ) -> Result<Task, RegisterError> {
-    if !channel.enabled {
-        return Err(RegisterError::ChannelDisabled);
+    if !profile.enabled {
+        return Err(RegisterError::ProfileDisabled);
     }
     if registration.gross < floor {
         return Err(RegisterError::GrossBelowFloor);
     }
-    if registration.gross < channel.min_gross {
-        return Err(RegisterError::GrossBelowChannelMinimum);
+    if registration.gross < profile.min_gross {
+        return Err(RegisterError::GrossBelowMinimum);
     }
-    if registration.donor_reputation < channel.min_reputation {
+    if registration.donor_reputation < profile.min_reputation {
         return Err(RegisterError::ReputationBelowMinimum);
     }
     if registration.duration < MIN_DURATION || registration.duration > MAX_DURATION {
@@ -240,8 +240,8 @@ mod tests {
     const DURATION: u64 = 86_400; // 1 day
     const VOTING_PERIOD: u64 = 3_600;
 
-    fn channel() -> ChannelParams {
-        ChannelParams {
+    fn profile() -> ProfileParams {
+        ProfileParams {
             min_gross: 34,
             min_reputation: 0,
             enabled: true,
@@ -258,7 +258,7 @@ mod tests {
     }
 
     fn fresh() -> Task {
-        register(T0, &channel(), 34, VOTING_PERIOD, &registration()).unwrap()
+        register(T0, &profile(), 34, VOTING_PERIOD, &registration()).unwrap()
     }
 
     fn vote(voter: u8, choice: Choice, weight: u128) -> Vote {
@@ -585,16 +585,16 @@ mod tests {
 
     #[test]
     fn registration_rejections_and_boundaries() {
-        let ch = channel();
+        let ch = profile();
         let reg = registration();
 
-        let disabled = ChannelParams {
+        let disabled = ProfileParams {
             enabled: false,
             ..ch.clone()
         };
         assert_eq!(
             register(T0, &disabled, 34, VOTING_PERIOD, &reg),
-            Err(RegisterError::ChannelDisabled)
+            Err(RegisterError::ProfileDisabled)
         );
 
         let below_floor = Registration {
@@ -606,7 +606,7 @@ mod tests {
             Err(RegisterError::GrossBelowFloor)
         );
 
-        let strict = ChannelParams {
+        let strict = ProfileParams {
             min_gross: 1_000_000,
             ..ch.clone()
         };
@@ -616,10 +616,10 @@ mod tests {
         };
         assert_eq!(
             register(T0, &strict, 34, VOTING_PERIOD, &below_channel),
-            Err(RegisterError::GrossBelowChannelMinimum)
+            Err(RegisterError::GrossBelowMinimum)
         );
 
-        let reputable = ChannelParams {
+        let reputable = ProfileParams {
             min_reputation: 1,
             ..ch.clone()
         };

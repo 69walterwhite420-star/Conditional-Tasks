@@ -18,7 +18,7 @@ pub mod verdict;
 pub mod vote;
 
 pub use task::{
-    Action, ChannelParams, DEADLINE_MARGIN, LOGIC_VERSION, MAX_DURATION, MIN_DURATION,
+    Action, ProfileParams, DEADLINE_MARGIN, LOGIC_VERSION, MAX_DURATION, MIN_DURATION,
     RegisterError, Registration, State, StepError, Task, register, step,
 };
 pub use verdict::{Outcome, VerdictError, verdict};

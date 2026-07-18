@@ -54,8 +54,8 @@ thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
 
-    /// Stored candid bytes of TaskRecord / ChannelRecord, keyed by the
-    /// length-prefixed (chain, task_id) / (chain, streamer) pairs.
+    /// Stored candid bytes of TaskRecord / ProfileRecord, keyed by the
+    /// length-prefixed (chain, task_id) / (chain, recipient) pairs.
     static TASKS: RefCell<StableBTreeMap<Vec<u8>, Vec<u8>, Memory>> =
         RefCell::new(StableBTreeMap::init(memory(TASKS_MEMORY)));
     static CHANNELS: RefCell<StableBTreeMap<Vec<u8>, Vec<u8>, Memory>> =
@@ -139,7 +139,7 @@ pub struct TaskRecord {
     pub chain: String,
     pub task_id: serde_bytes::ByteBuf,
     pub donor: serde_bytes::ByteBuf,
-    pub streamer: serde_bytes::ByteBuf,
+    pub recipient: serde_bytes::ByteBuf,
     pub gross: u64,
     pub deadline: u64,
     pub resolver: serde_bytes::ByteBuf,
@@ -160,7 +160,7 @@ pub struct TaskRecord {
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct ChannelRecord {
+pub struct ProfileRecord {
     pub min_gross: u64,
     pub min_reputation: u128,
     pub enabled: bool,
@@ -255,8 +255,8 @@ pub fn task_key(chain: &str, task_id: &[u8]) -> Vec<u8> {
     composite_key(chain, task_id)
 }
 
-pub(crate) fn channel_key(chain: &str, streamer: &[u8]) -> Vec<u8> {
-    composite_key(chain, streamer)
+pub(crate) fn profile_key(chain: &str, recipient: &[u8]) -> Vec<u8> {
+    composite_key(chain, recipient)
 }
 
 pub(crate) fn task_exists(key: &[u8]) -> bool {
@@ -325,16 +325,16 @@ fn due_of(record: &TaskRecord) -> Option<u64> {
     }
 }
 
-pub(crate) fn load_channel(chain: &str, streamer: &[u8], floor: u64) -> ChannelRecord {
+pub(crate) fn load_profile(chain: &str, recipient: &[u8], floor: u64) -> ProfileRecord {
     CHANNELS
-        .with_borrow(|channels| channels.get(&channel_key(chain, streamer)))
-        .map(|bytes| match Decode!(&bytes, ChannelRecord) {
+        .with_borrow(|profiles| profiles.get(&profile_key(chain, recipient)))
+        .map(|bytes| match Decode!(&bytes, ProfileRecord) {
             Ok(record) => record,
-            Err(_) => ic_cdk::trap("stable channels: undecodable record"),
+            Err(_) => ic_cdk::trap("stable profiles: undecodable record"),
         })
-        // A channel nobody configured accepts tasks at the shape floor:
-        // permissionless by default, the streamer simply never accepts.
-        .unwrap_or(ChannelRecord {
+        // A profile nobody configured accepts tasks at the shape floor:
+        // permissionless by default, the recipient simply never accepts.
+        .unwrap_or(ProfileRecord {
             min_gross: floor,
             min_reputation: 0,
             enabled: true,
@@ -342,20 +342,20 @@ pub(crate) fn load_channel(chain: &str, streamer: &[u8], floor: u64) -> ChannelR
         })
 }
 
-pub(crate) fn save_channel(chain: &str, streamer: &[u8], record: &ChannelRecord) {
+pub(crate) fn save_channel(chain: &str, recipient: &[u8], record: &ProfileRecord) {
     let bytes = match Encode!(record) {
         Ok(bytes) => bytes,
-        Err(_) => ic_cdk::trap("channel record: encode failed"),
+        Err(_) => ic_cdk::trap("profile record: encode failed"),
     };
-    CHANNELS.with_borrow_mut(|channels| channels.insert(channel_key(chain, streamer), bytes));
+    CHANNELS.with_borrow_mut(|profiles| profiles.insert(profile_key(chain, recipient), bytes));
 }
 
-pub(crate) fn tasks_of_streamer(chain: &str, streamer: &[u8]) -> Vec<Vec<u8>> {
+pub(crate) fn tasks_of_recipient(chain: &str, recipient: &[u8]) -> Vec<Vec<u8>> {
     TASKS.with_borrow(|tasks| {
         tasks
             .iter()
             .map(|entry| decode_task(&entry.value()))
-            .filter(|record| record.chain == chain && record.streamer.as_slice() == streamer)
+            .filter(|record| record.chain == chain && record.recipient.as_slice() == recipient)
             .map(|record| record.task_id.to_vec())
             .collect()
     })

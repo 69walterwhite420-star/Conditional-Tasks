@@ -1,6 +1,6 @@
 //! Votes: an opaque voter, a binary choice, a book weight (docs/game-spec.md §6).
 
-/// Minimal book value to vote, in minor units of reputation (the book is
+/// Minimal reputation to vote, in minor units of reputation (the book is
 /// denominated in USDC, 6 decimals).
 pub const MIN_VOTE_WEIGHT: u128 = 100_000;
 
@@ -16,7 +16,7 @@ pub enum Choice {
     NotDone,
 }
 
-/// One recorded vote. `weight` is book[(chain, voter, streamer)] at the
+/// One recorded vote. `weight` is book[(chain, voter, recipient)] at the
 /// moment the vote was processed — there is no snapshot (game-spec §6).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Vote {

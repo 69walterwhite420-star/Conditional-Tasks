@@ -3,10 +3,10 @@
 //! the outside — produced by the canister, injected here byte for byte.
 //!
 //! Usage:
-//!   e2e-solana donate  <rpc> <donor.json> <streamer_b58> <gross>
-//!   e2e-solana create  <rpc> <donor.json> <streamer_b58> <gross> <deadline> <resolver_hex32> <fee_bps> <fee_wallet_b58> <nonce>
-//!   e2e-solana claim   <rpc> <payer.json> <escrow_b58> <outcome> <sig_hex> <resolver_hex32>
-//!   e2e-solana refund  <rpc> <payer.json> <escrow_b58>
+//!   e2e-solana donate  <rpc> <donor.json> <recipient_b58> <gross>
+//!   e2e-solana create  <rpc> <donor.json> <recipient_b58> <gross> <deadline> <resolver_hex32> <fee_bps> <fee_wallet_b58> <nonce>
+//!   e2e-solana claim   <rpc> <fee_payer.json> <escrow_b58> <outcome> <sig_hex> <resolver_hex32>
+//!   e2e-solana refund  <rpc> <fee_payer.json> <escrow_b58>
 //!   e2e-solana balance <rpc> <owner_b58>
 
 use std::str::FromStr;
@@ -28,12 +28,12 @@ fn client(url: &str) -> RpcClient {
     RpcClient::new_with_commitment(url.to_string(), CommitmentConfig::confirmed())
 }
 
-fn send(rpc: &RpcClient, payer: &Keypair, instructions: &[Instruction]) {
+fn send(rpc: &RpcClient, fee_payer: &Keypair, instructions: &[Instruction]) {
     let blockhash = rpc.get_latest_blockhash().expect("blockhash");
     let tx = Transaction::new_signed_with_payer(
         instructions,
-        Some(&payer.pubkey()),
-        &[payer],
+        Some(&fee_payer.pubkey()),
+        &[fee_payer],
         blockhash,
     );
     let signature = rpc.send_and_confirm_transaction(&tx).expect("transaction");
@@ -44,9 +44,9 @@ fn ata(owner: &Pubkey) -> Pubkey {
     get_associated_token_address(owner, &factory::USDC_MINT)
 }
 
-fn create_ata_ix(payer: &Pubkey, owner: &Pubkey) -> Instruction {
+fn create_ata_ix(fee_payer: &Pubkey, owner: &Pubkey) -> Instruction {
     spl_associated_token_account::instruction::create_associated_token_account_idempotent(
-        payer,
+        fee_payer,
         owner,
         &factory::USDC_MINT,
         &spl_token::ID,
@@ -84,19 +84,19 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("donate") => {
-            let [rpc, keypair, streamer, gross] = &args[2..] else {
-                panic!("donate <rpc> <donor.json> <streamer_b58> <gross>");
+            let [rpc, keypair, recipient, gross] = &args[2..] else {
+                panic!("donate <rpc> <donor.json> <recipient_b58> <gross>");
             };
             let rpc = client(rpc);
             let donor = read_keypair_file(keypair).expect("donor keypair");
-            let streamer = Pubkey::from_str(streamer).expect("streamer");
+            let recipient = Pubkey::from_str(recipient).expect("recipient");
             let gross: u64 = gross.parse().expect("gross");
             let accounts = splitter::accounts::Donate {
-                payer: donor.pubkey(),
-                streamer,
+                donor: donor.pubkey(),
+                recipient,
                 mint: splitter::USDC_MINT,
-                payer_usdc: ata(&donor.pubkey()),
-                streamer_usdc: ata(&streamer),
+                donor_usdc: ata(&donor.pubkey()),
+                recipient_usdc: ata(&recipient),
                 token_program: spl_token::ID,
                 event_authority: Pubkey::find_program_address(
                     &[b"__event_authority"],
@@ -109,7 +109,7 @@ fn main() {
                 &rpc,
                 &donor,
                 &[
-                    create_ata_ix(&donor.pubkey(), &streamer),
+                    create_ata_ix(&donor.pubkey(), &recipient),
                     Instruction {
                         program_id: splitter::ID,
                         accounts: accounts.to_account_metas(None),
@@ -119,17 +119,17 @@ fn main() {
             );
         }
         Some("create") => {
-            let [rpc, keypair, streamer, gross, deadline, resolver, fee_bps, fee_wallet, nonce] =
+            let [rpc, keypair, recipient, gross, deadline, resolver, fee_bps, fee_wallet, nonce] =
                 &args[2..]
             else {
                 panic!(
-                    "create <rpc> <donor.json> <streamer_b58> <gross> <deadline> \
+                    "create <rpc> <donor.json> <recipient_b58> <gross> <deadline> \
                      <resolver_hex32> <fee_bps> <fee_wallet_b58> <nonce>"
                 );
             };
             let rpc = client(rpc);
             let donor = read_keypair_file(keypair).expect("donor keypair");
-            let streamer = Pubkey::from_str(streamer).expect("streamer");
+            let recipient = Pubkey::from_str(recipient).expect("recipient");
             let gross: u64 = gross.parse().expect("gross");
             let deadline: i64 = deadline.parse().expect("deadline");
             let nonce: u64 = nonce.parse().expect("nonce");
@@ -139,7 +139,7 @@ fn main() {
                 Pubkey::new_from_array(hex::decode(resolver).unwrap().try_into().unwrap());
             let salt = factory::birth_salt(
                 &donor.pubkey(),
-                &streamer,
+                &recipient,
                 gross,
                 deadline,
                 &resolver,
@@ -150,7 +150,7 @@ fn main() {
             let (escrow, _) = Pubkey::find_program_address(&[b"escrow", &salt], &factory::ID);
             let accounts = factory::accounts::CreateEscrow {
                 donor: donor.pubkey(),
-                streamer,
+                recipient,
                 mint: factory::USDC_MINT,
                 escrow,
                 donor_usdc: ata(&donor.pubkey()),
@@ -180,10 +180,10 @@ fn main() {
         }
         Some("claim") => {
             let [rpc, keypair, escrow, outcome, signature, resolver] = &args[2..] else {
-                panic!("claim <rpc> <payer.json> <escrow_b58> <outcome> <sig_hex> <resolver_hex32>");
+                panic!("claim <rpc> <fee_payer.json> <escrow_b58> <outcome> <sig_hex> <resolver_hex32>");
             };
             let rpc = client(rpc);
-            let payer = read_keypair_file(keypair).expect("payer keypair");
+            let fee_payer = read_keypair_file(keypair).expect("fee_payer keypair");
             let escrow = Pubkey::from_str(escrow).expect("escrow");
             let outcome: u8 = outcome.parse().expect("outcome");
             let signature: [u8; 64] = hex::decode(signature).unwrap().try_into().unwrap();
@@ -202,8 +202,8 @@ fn main() {
                 escrow_usdc: ata(&escrow),
                 donor: state.donor,
                 donor_usdc: ata(&state.donor),
-                streamer: state.streamer,
-                streamer_usdc: Some(ata(&state.streamer)),
+                recipient: state.recipient,
+                recipient_usdc: Some(ata(&state.recipient)),
                 fee_usdc: Some(ata(&state.fee_wallet)),
                 splitter_event_authority: Some(
                     Pubkey::find_program_address(&[b"__event_authority"], &factory::SPLITTER).0,
@@ -214,10 +214,10 @@ fn main() {
             };
             send(
                 &rpc,
-                &payer,
+                &fee_payer,
                 &[
-                    create_ata_ix(&payer.pubkey(), &state.streamer),
-                    create_ata_ix(&payer.pubkey(), &state.fee_wallet),
+                    create_ata_ix(&fee_payer.pubkey(), &state.recipient),
+                    create_ata_ix(&fee_payer.pubkey(), &state.fee_wallet),
                     verdict_ix(&resolver, &signature, &message),
                     Instruction {
                         program_id: factory::ID,
@@ -229,10 +229,10 @@ fn main() {
         }
         Some("refund") => {
             let [rpc, keypair, escrow] = &args[2..] else {
-                panic!("refund <rpc> <payer.json> <escrow_b58>");
+                panic!("refund <rpc> <fee_payer.json> <escrow_b58>");
             };
             let rpc = client(rpc);
-            let payer = read_keypair_file(keypair).expect("payer keypair");
+            let fee_payer = read_keypair_file(keypair).expect("fee_payer keypair");
             let escrow = Pubkey::from_str(escrow).expect("escrow");
             let state = escrow_state(&rpc, &escrow);
             let accounts = factory::accounts::Refund {
@@ -245,7 +245,7 @@ fn main() {
             };
             send(
                 &rpc,
-                &payer,
+                &fee_payer,
                 &[Instruction {
                     program_id: factory::ID,
                     accounts: accounts.to_account_metas(None),

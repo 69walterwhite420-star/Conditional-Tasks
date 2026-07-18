@@ -5,22 +5,22 @@
 use candid::{Nat, Principal};
 use serde_bytes::ByteBuf;
 
-/// book[(chain, wallet, streamer)] at this moment, straight from the pinned
+/// book[(chain, wallet, recipient)] at this moment, straight from the pinned
 /// crown-index canister.
-pub async fn book_value(chain: &str, wallet: &[u8], streamer: &[u8]) -> Result<u128, String> {
+pub async fn reputation(chain: &str, wallet: &[u8], recipient: &[u8]) -> Result<u128, String> {
     let index = crate::crown_index().ok_or("crown-index principal is not configured")?;
     let response = ic_cdk::call::Call::unbounded_wait(index, "get_reputation")
         .with_args(&(
             chain.to_string(),
             ByteBuf::from(wallet.to_vec()),
-            ByteBuf::from(streamer.to_vec()),
+            ByteBuf::from(recipient.to_vec()),
         ))
         .await
         .map_err(|error| format!("crown-index call failed: {error}"))?;
     let value: Nat = response
         .candid()
         .map_err(|error| format!("crown-index reply: {error}"))?;
-    u128::try_from(value.0).map_err(|_| "book value exceeds u128".to_string())
+    u128::try_from(value.0).map_err(|_| "reputation exceeds u128".to_string())
 }
 
 /// The book canister: the init override (local testing) wins, otherwise the

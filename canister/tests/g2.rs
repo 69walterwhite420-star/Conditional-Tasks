@@ -1,4 +1,4 @@
-//! G2 integration: the canister inside PocketIC — registration, streamer
+//! G2 integration: the canister inside PocketIC — registration, recipient
 //! signatures, timer transitions, certified state (docs/build-plan.md G2).
 //!
 //! Needs the release wasm and a pocket-ic server binary; driven by
@@ -8,8 +8,8 @@ mod common;
 
 use candid::Encode;
 use common::*;
-use conditional_tasks::api::{ActionArg, ChannelArg, RegisterArg};
-use conditional_tasks::{ChannelRecord, auth};
+use conditional_tasks::api::{ActionArg, ProfileArg, RegisterArg};
+use conditional_tasks::{ProfileRecord, auth};
 use conditional_tasks_logic as logic;
 use serde_bytes::ByteBuf;
 
@@ -18,9 +18,9 @@ use serde_bytes::ByteBuf;
 fn full_flow_with_certificates() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
-    let registered = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    let registered = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     let task = fetch_task(&pic, canister, &registered.task_id);
     let record = task_state(&task);
     assert_eq!(record.state, conditional_tasks::StateView::Created);
@@ -33,7 +33,7 @@ fn full_flow_with_certificates() {
         "accept",
         auth::Action::Accept,
         &registered.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
     let task = fetch_task(&pic, canister, &registered.task_id);
@@ -49,7 +49,7 @@ fn full_flow_with_certificates() {
         "done",
         auth::Action::Done,
         &registered.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
     let task = fetch_task(&pic, canister, &registered.task_id);
@@ -63,7 +63,7 @@ fn full_flow_with_certificates() {
         &pic,
         canister,
         "list_tasks",
-        Encode!(&CHAIN.to_string(), &ByteBuf::from(streamer.address.clone())).unwrap(),
+        Encode!(&CHAIN.to_string(), &ByteBuf::from(recipient.address.clone())).unwrap(),
     );
     assert_eq!(ids, vec![ByteBuf::from(registered.task_id)]);
 
@@ -76,13 +76,13 @@ fn full_flow_with_certificates() {
 fn foreign_signatures_are_rejected() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let stranger = wallet(3);
 
-    let a = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
-    let b = register(&pic, canister, &donor, &streamer.address, 2).unwrap();
+    let a = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
+    let b = register(&pic, canister, &donor, &recipient.address, 2).unwrap();
 
-    // A stranger's key is not the streamer.
+    // A stranger's key is not the recipient.
     let error = streamer_call(
         &pic,
         canister,
@@ -93,7 +93,7 @@ fn foreign_signatures_are_rejected() {
     )
     .unwrap_err();
     assert_eq!(error, "bad signature");
-    // The donor's key is not the streamer either.
+    // The donor's key is not the recipient either.
     let error = streamer_call(
         &pic,
         canister,
@@ -115,7 +115,7 @@ fn foreign_signatures_are_rejected() {
     let arg = ActionArg {
         chain: CHAIN.to_string(),
         task_id: ByteBuf::from(a.task_id.clone()),
-        signature: ByteBuf::from(sign(&streamer, message.as_bytes())),
+        signature: ByteBuf::from(sign(&recipient, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) = update(&pic, canister, "accept", Encode!(&arg).unwrap());
     assert_eq!(result.unwrap_err(), "bad signature");
@@ -130,7 +130,7 @@ fn foreign_signatures_are_rejected() {
     let arg = ActionArg {
         chain: CHAIN.to_string(),
         task_id: ByteBuf::from(a.task_id.clone()),
-        signature: ByteBuf::from(sign(&streamer, message.as_bytes())),
+        signature: ByteBuf::from(sign(&recipient, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) = update(&pic, canister, "accept", Encode!(&arg).unwrap());
     assert_eq!(result.unwrap_err(), "bad signature");
@@ -148,10 +148,10 @@ fn foreign_signatures_are_rejected() {
 fn registration_validation_and_duplicates() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
-    register(&pic, canister, &donor, &streamer.address, 1).unwrap();
-    let error = register(&pic, canister, &donor, &streamer.address, 1).unwrap_err();
+    register(&pic, canister, &donor, &recipient.address, 1).unwrap();
+    let error = register(&pic, canister, &donor, &recipient.address, 1).unwrap_err();
     assert_eq!(error, "task already registered");
 
     // Deadline below registration + duration + voting + margin.
@@ -162,7 +162,7 @@ fn registration_validation_and_duplicates() {
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,
-        &streamer.address,
+        &recipient.address,
         1_000_000,
         tight,
         &resolver,
@@ -182,7 +182,7 @@ fn registration_validation_and_duplicates() {
     let arg = RegisterArg {
         chain: CHAIN.to_string(),
         donor: ByteBuf::from(donor.address.clone()),
-        streamer: ByteBuf::from(streamer.address.clone()),
+        recipient: ByteBuf::from(recipient.address.clone()),
         gross: 1_000_000,
         deadline: tight,
         resolver: ByteBuf::from(resolver.to_vec()),
@@ -201,7 +201,7 @@ fn registration_validation_and_duplicates() {
 fn tampered_registration_fields_break_the_signature() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let spec = auth::spec_of(CHAIN).unwrap();
     let now = now_seconds(&pic);
     let gross = 1_000_000;
@@ -210,7 +210,7 @@ fn tampered_registration_fields_break_the_signature() {
     let task_id = auth::derive_task_id(
         spec,
         &donor.address,
-        &streamer.address,
+        &recipient.address,
         gross,
         deadline,
         &resolver,
@@ -231,7 +231,7 @@ fn tampered_registration_fields_break_the_signature() {
     let arg = RegisterArg {
         chain: CHAIN.to_string(),
         donor: ByteBuf::from(donor.address.clone()),
-        streamer: ByteBuf::from(streamer.address.clone()),
+        recipient: ByteBuf::from(recipient.address.clone()),
         gross,
         deadline,
         resolver: ByteBuf::from(resolver.to_vec()),
@@ -250,12 +250,12 @@ fn tampered_registration_fields_break_the_signature() {
 fn time_expires_tasks_with_and_without_the_timer() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
     // Task A dies by the global timer alone.
-    let a = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    let a = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     // Task B dies inside the rejected accept (time first), timer or not.
-    let b = register(&pic, canister, &donor, &streamer.address, 2).unwrap();
+    let b = register(&pic, canister, &donor, &recipient.address, 2).unwrap();
 
     pic.advance_time(std::time::Duration::from_secs(DURATION + 90));
     pic.tick();
@@ -275,7 +275,7 @@ fn time_expires_tasks_with_and_without_the_timer() {
         "accept",
         auth::Action::Accept,
         &b.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap_err();
     assert_eq!(error, "invalid transition");
@@ -293,16 +293,16 @@ fn time_expires_tasks_with_and_without_the_timer() {
 fn empty_voting_cancels_by_timer() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
-    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     streamer_call(
         &pic,
         canister,
         "accept",
         auth::Action::Accept,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
     streamer_call(
@@ -311,7 +311,7 @@ fn empty_voting_cancels_by_timer() {
         "done",
         auth::Action::Done,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
 
@@ -333,16 +333,16 @@ fn empty_voting_cancels_by_timer() {
 fn decline_after_accept_frees_the_task() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
-    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     streamer_call(
         &pic,
         canister,
         "accept",
         auth::Action::Accept,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
     streamer_call(
@@ -351,7 +351,7 @@ fn decline_after_accept_frees_the_task() {
         "decline",
         auth::Action::Decline,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
     let task = fetch_task(&pic, canister, &r.task_id);
@@ -368,7 +368,7 @@ fn decline_after_accept_frees_the_task() {
         "decline",
         auth::Action::Decline,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap_err();
     assert_eq!(error, "invalid transition");
@@ -379,58 +379,58 @@ fn decline_after_accept_frees_the_task() {
 fn channel_params_counter_and_floor() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
     let set = |min_gross: u64, min_reputation: u128, enabled: bool, counter: u64| {
-        let message = auth::channel_message(
+        let message = auth::profile_message(
             CHAIN,
             &canister.to_text(),
-            &streamer.address,
+            &recipient.address,
             min_gross,
             min_reputation,
             enabled,
             counter,
         );
-        let arg = ChannelArg {
+        let arg = ProfileArg {
             chain: CHAIN.to_string(),
-            streamer: ByteBuf::from(streamer.address.clone()),
+            recipient: ByteBuf::from(recipient.address.clone()),
             min_gross,
             min_reputation,
             enabled,
             counter,
-            signature: ByteBuf::from(sign(&streamer, message.as_bytes())),
+            signature: ByteBuf::from(sign(&recipient, message.as_bytes())),
         };
         let (result,): (Result<(), String>,) =
-            update(&pic, canister, "set_channel_params", Encode!(&arg).unwrap());
+            update(&pic, canister, "set_profile", Encode!(&arg).unwrap());
         result
     };
 
     set(2_000_000, 0, true, 1).unwrap();
-    let (channel,): (Option<ChannelRecord>,) = query(
+    let (profile,): (Option<ProfileRecord>,) = query(
         &pic,
         canister,
-        "get_channel",
-        Encode!(&CHAIN.to_string(), &ByteBuf::from(streamer.address.clone())).unwrap(),
+        "get_profile",
+        Encode!(&CHAIN.to_string(), &ByteBuf::from(recipient.address.clone())).unwrap(),
     );
-    let channel = channel.unwrap();
-    assert_eq!((channel.min_gross, channel.counter), (2_000_000, 1));
+    let profile = profile.unwrap();
+    assert_eq!((profile.min_gross, profile.counter), (2_000_000, 1));
 
     // Same counter replays are dead.
     assert_eq!(set(3_000_000, 0, true, 1).unwrap_err(), "stale counter");
-    // The channel knob can never undercut the shape floor.
+    // The profile knob can never undercut the shape floor.
     assert_eq!(
         set(10, 0, true, 2).unwrap_err(),
-        "channel minimum below the shape floor"
+        "profile minimum below the shape floor"
     );
 
-    // gross below the channel minimum is rejected at registration.
-    let error = register(&pic, canister, &donor, &streamer.address, 1).unwrap_err();
-    assert_eq!(error, "gross below the channel minimum");
+    // gross below the profile minimum is rejected at registration.
+    let error = register(&pic, canister, &donor, &recipient.address, 1).unwrap_err();
+    assert_eq!(error, "gross below the profile minimum");
 
-    // A disabled channel registers nothing.
+    // A disabled profile registers nothing.
     set(2_000_000, 0, false, 2).unwrap();
-    let error = register(&pic, canister, &donor, &streamer.address, 2).unwrap_err();
-    assert_eq!(error, "channel disabled");
+    let error = register(&pic, canister, &donor, &recipient.address, 2).unwrap_err();
+    assert_eq!(error, "profile disabled");
 }
 
 #[test]
@@ -438,9 +438,9 @@ fn channel_params_counter_and_floor() {
 fn operator_refund_cancels_and_attributes() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
-    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     streamer_call(
         &pic,
         canister,
@@ -458,7 +458,7 @@ fn operator_refund_cancels_and_attributes() {
             outcome: conditional_tasks::OutcomeView::Cancel
         }
     );
-    // Attributed forever: this cancel names the operator, not the streamer.
+    // Attributed forever: this cancel names the operator, not the recipient.
     assert!(record.operator_refunded_at.is_some());
     verify_certified_task(&pic, canister, &task);
 
@@ -500,16 +500,16 @@ fn operator_refund_cancels_and_attributes() {
 fn operator_refund_works_mid_voting() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
-    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
+    let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     streamer_call(
         &pic,
         canister,
         "accept",
         auth::Action::Accept,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
     streamer_call(
@@ -518,18 +518,18 @@ fn operator_refund_works_mid_voting() {
         "done",
         auth::Action::Done,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap();
 
-    // VOTING is closed to the streamer's decline but open to the operator.
+    // VOTING is closed to the recipient's decline but open to the operator.
     let error = streamer_call(
         &pic,
         canister,
         "decline",
         auth::Action::Decline,
         &r.task_id,
-        &streamer,
+        &recipient,
     )
     .unwrap_err();
     assert_eq!(error, "invalid transition");
@@ -557,11 +557,11 @@ fn operator_refund_works_mid_voting() {
 fn operator_refund_rejects_foreign_wallets() {
     let (pic, canister) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
-    let r = register(&pic, canister, &donor, &streamer.address, 1).unwrap();
-    // Neither the streamer nor a stranger holds the operator's pen.
-    for signer in [&streamer, &wallet(9)] {
+    let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
+    // Neither the recipient nor a stranger holds the operator's pen.
+    for signer in [&recipient, &wallet(9)] {
         let error = streamer_call(
             &pic,
             canister,

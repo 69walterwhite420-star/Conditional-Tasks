@@ -18,20 +18,20 @@ fn task_in_voting(
     pic: &PocketIc,
     game: Principal,
     donor: &Wallet,
-    streamer: &Wallet,
+    recipient: &Wallet,
     nonce: u64,
 ) -> Vec<u8> {
-    let r = register(pic, game, donor, &streamer.address, nonce).unwrap();
+    let r = register(pic, game, donor, &recipient.address, nonce).unwrap();
     streamer_call(
         pic,
         game,
         "accept",
         auth::Action::Accept,
         &r.task_id,
-        streamer,
+        recipient,
     )
     .unwrap();
-    streamer_call(pic, game, "done", auth::Action::Done, &r.task_id, streamer).unwrap();
+    streamer_call(pic, game, "done", auth::Action::Done, &r.task_id, recipient).unwrap();
     r.task_id
 }
 
@@ -68,12 +68,12 @@ fn cast_vote(
 fn vote_weight_comes_from_the_book() {
     let (pic, game, index) = setup_with_index();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let rich = wallet(3);
     let poor = wallet(4);
 
-    seed_reputation(&pic, index, &rich.address, &streamer.address, 5_000_000);
-    let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
+    seed_reputation(&pic, index, &rich.address, &recipient.address, 5_000_000);
+    let task_id = task_in_voting(&pic, game, &donor, &recipient, 1);
 
     cast_vote(&pic, game, &task_id, &rich, ChoiceView::Done).unwrap();
     let record = task_state(&fetch_task(&pic, game, &task_id));
@@ -81,7 +81,7 @@ fn vote_weight_comes_from_the_book() {
     assert_eq!(record.votes[0].voter.as_slice(), rich.address.as_slice());
     assert_eq!(record.votes[0].weight, 5_000_000);
 
-    // No reputation with this streamer — below the threshold.
+    // No reputation with this recipient — below the threshold.
     let error = cast_vote(&pic, game, &task_id, &poor, ChoiceView::Done).unwrap_err();
     assert_eq!(error, "vote weight below threshold");
 
@@ -97,16 +97,16 @@ fn vote_weight_comes_from_the_book() {
 fn majority_settles_and_the_tally_is_idempotent() {
     let (pic, game, index) = setup_with_index();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let a = wallet(3);
     let b = wallet(4);
     let c = wallet(5);
 
-    seed_reputation(&pic, index, &a.address, &streamer.address, 5_000_000);
-    seed_reputation(&pic, index, &b.address, &streamer.address, 1_000_000);
-    seed_reputation(&pic, index, &c.address, &streamer.address, 5_900_000);
+    seed_reputation(&pic, index, &a.address, &recipient.address, 5_000_000);
+    seed_reputation(&pic, index, &b.address, &recipient.address, 1_000_000);
+    seed_reputation(&pic, index, &c.address, &recipient.address, 5_900_000);
 
-    let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
+    let task_id = task_in_voting(&pic, game, &donor, &recipient, 1);
     cast_vote(&pic, game, &task_id, &a, ChoiceView::Done).unwrap();
     cast_vote(&pic, game, &task_id, &b, ChoiceView::Done).unwrap();
     cast_vote(&pic, game, &task_id, &c, ChoiceView::NotDone).unwrap();
@@ -146,7 +146,7 @@ fn majority_settles_and_the_tally_is_idempotent() {
 
     // Late votes bounce off the decided task.
     let late = wallet(6);
-    seed_reputation(&pic, index, &late.address, &streamer.address, 9_000_000);
+    seed_reputation(&pic, index, &late.address, &recipient.address, 9_000_000);
     let error = cast_vote(&pic, game, &task_id, &late, ChoiceView::NotDone).unwrap_err();
     assert_eq!(error, "invalid transition");
 }
@@ -156,14 +156,14 @@ fn majority_settles_and_the_tally_is_idempotent() {
 fn tie_cancels() {
     let (pic, game, index) = setup_with_index();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let a = wallet(3);
     let b = wallet(4);
 
-    seed_reputation(&pic, index, &a.address, &streamer.address, 1_000_000);
-    seed_reputation(&pic, index, &b.address, &streamer.address, 1_000_000);
+    seed_reputation(&pic, index, &a.address, &recipient.address, 1_000_000);
+    seed_reputation(&pic, index, &b.address, &recipient.address, 1_000_000);
 
-    let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
+    let task_id = task_in_voting(&pic, game, &donor, &recipient, 1);
     cast_vote(&pic, game, &task_id, &a, ChoiceView::Done).unwrap();
     cast_vote(&pic, game, &task_id, &b, ChoiceView::NotDone).unwrap();
 
@@ -185,12 +185,12 @@ fn tie_cancels() {
 fn votes_outside_the_voting_window_are_rejected() {
     let (pic, game, index) = setup_with_index();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let voter = wallet(3);
-    seed_reputation(&pic, index, &voter.address, &streamer.address, 5_000_000);
+    seed_reputation(&pic, index, &voter.address, &recipient.address, 5_000_000);
 
     // CREATED: no voting yet.
-    let r = register(&pic, game, &donor, &streamer.address, 1).unwrap();
+    let r = register(&pic, game, &donor, &recipient.address, 1).unwrap();
     let error = cast_vote(&pic, game, &r.task_id, &voter, ChoiceView::Done).unwrap_err();
     assert_eq!(error, "invalid transition");
 }
@@ -200,38 +200,38 @@ fn votes_outside_the_voting_window_are_rejected() {
 fn min_reputation_gates_registration() {
     let (pic, game, index) = setup_with_index();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
 
-    // The streamer demands reputation from donors.
-    let message = auth::channel_message(
+    // The recipient demands reputation from donors.
+    let message = auth::profile_message(
         CHAIN,
         &game.to_text(),
-        &streamer.address,
+        &recipient.address,
         34,
         1_000_000,
         true,
         1,
     );
-    let arg = conditional_tasks::api::ChannelArg {
+    let arg = conditional_tasks::api::ProfileArg {
         chain: CHAIN.to_string(),
-        streamer: ByteBuf::from(streamer.address.clone()),
+        recipient: ByteBuf::from(recipient.address.clone()),
         min_gross: 34,
         min_reputation: 1_000_000,
         enabled: true,
         counter: 1,
-        signature: ByteBuf::from(sign(&streamer, message.as_bytes())),
+        signature: ByteBuf::from(sign(&recipient, message.as_bytes())),
     };
     let (result,): (Result<(), String>,) =
-        update(&pic, game, "set_channel_params", Encode!(&arg).unwrap());
+        update(&pic, game, "set_profile", Encode!(&arg).unwrap());
     result.unwrap();
 
     // An unknown donor is below the bar.
-    let error = register(&pic, game, &donor, &streamer.address, 1).unwrap_err();
-    assert_eq!(error, "donor reputation below the channel minimum");
+    let error = register(&pic, game, &donor, &recipient.address, 1).unwrap_err();
+    assert_eq!(error, "donor reputation below the profile minimum");
 
     // A donor with book history passes.
-    seed_reputation(&pic, index, &donor.address, &streamer.address, 2_000_000);
-    register(&pic, game, &donor, &streamer.address, 1).unwrap();
+    seed_reputation(&pic, index, &donor.address, &recipient.address, 2_000_000);
+    register(&pic, game, &donor, &recipient.address, 1).unwrap();
 }
 
 #[test]
@@ -241,10 +241,10 @@ fn unconfigured_book_fails_votes_cleanly() {
     // demand works (no book call), voting errors and records nothing.
     let (pic, game) = setup();
     let donor = wallet(1);
-    let streamer = wallet(2);
+    let recipient = wallet(2);
     let voter = wallet(3);
 
-    let task_id = task_in_voting(&pic, game, &donor, &streamer, 1);
+    let task_id = task_in_voting(&pic, game, &donor, &recipient, 1);
     let error = cast_vote(&pic, game, &task_id, &voter, ChoiceView::Done).unwrap_err();
     assert_eq!(error, "crown-index principal is not configured");
     let record = task_state(&fetch_task(&pic, game, &task_id));
