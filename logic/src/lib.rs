@@ -18,8 +18,8 @@ pub mod verdict;
 pub mod vote;
 
 pub use task::{
-    Action, ProfileParams, DEADLINE_MARGIN, LOGIC_VERSION, MAX_DURATION, MIN_DURATION,
+    Action, DEADLINE_MARGIN, LOGIC_VERSION, MAX_DURATION, MIN_DURATION, ProfileParams,
     RegisterError, Registration, State, StepError, Task, register, step,
 };
-pub use verdict::{Outcome, VerdictError, verdict};
+pub use verdict::{Outcome, verdict};
 pub use vote::{Choice, MIN_VOTE_WEIGHT, Vote, Voter};

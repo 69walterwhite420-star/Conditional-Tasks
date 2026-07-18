@@ -31,7 +31,15 @@ fn task_in_voting(
         recipient,
     )
     .unwrap();
-    recipient_call(pic, game, "ready", auth::Action::Ready, &r.task_id, recipient).unwrap();
+    recipient_call(
+        pic,
+        game,
+        "ready",
+        auth::Action::Ready,
+        &r.task_id,
+        recipient,
+    )
+    .unwrap();
     r.task_id
 }
 

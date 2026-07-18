@@ -194,13 +194,16 @@ fn operator_refund(arg: ActionArg) -> Result<(), String> {
         .map_err(|e| e.text().to_string())?;
 
     let now = crate::now_seconds();
+    let before = record.clone();
     let mut task = record.to_logic();
     let result = logic::step(&mut task, logic::Action::OperatorRefund, now);
     record.absorb(&task);
     if result.is_ok() {
         record.operator_refunded_at = Some(now);
     }
-    crate::save_task(&record);
+    if record != before {
+        crate::save_task(&record);
+    }
     result.map_err(step_error_text)
 }
 
@@ -297,10 +300,13 @@ fn recipient_action(
     auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &record.recipient)
         .map_err(|e| e.text().to_string())?;
 
+    let before = record.clone();
     let mut task = record.to_logic();
     let result = logic::step(&mut task, action, crate::now_seconds());
     record.absorb(&task);
-    crate::save_task(&record);
+    if record != before {
+        crate::save_task(&record);
+    }
     result.map_err(step_error_text)
 }
 

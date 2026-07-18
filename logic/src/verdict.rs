@@ -11,16 +11,13 @@ pub enum Outcome {
     Cancel,
 }
 
-/// The only failure the rule can produce: the u128 total would overflow.
-/// An error is a value here, never a panic.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VerdictError {
-    Overflow,
-}
-
-/// `Settle` iff Σweight(done) strictly exceeds Σweight(not done).
-/// Ties and an empty vote cancel: silence does not move other people's money.
-pub fn verdict(votes: &[Vote]) -> Result<Outcome, VerdictError> {
+/// `Settle` iff Σweight(done) strictly exceeds Σweight(not done). A tie,
+/// an empty vote and any overflowing tally cancel: silence and broken sums
+/// never move money, and a task always finalizes rather than stranding in
+/// VOTING — the deliberate mirror of the sibling games' total tally.
+/// Overflow is only reachable if the book (a trusted core canister) reports
+/// an absurd weight; cancelling then is the conservative choice.
+pub fn verdict(votes: &[Vote]) -> Outcome {
     let mut done: u128 = 0;
     let mut not_done: u128 = 0;
     for vote in votes {
@@ -28,15 +25,16 @@ pub fn verdict(votes: &[Vote]) -> Result<Outcome, VerdictError> {
             Choice::Done => &mut done,
             Choice::NotDone => &mut not_done,
         };
-        *total = total
-            .checked_add(vote.weight)
-            .ok_or(VerdictError::Overflow)?;
+        match total.checked_add(vote.weight) {
+            Some(sum) => *total = sum,
+            None => return Outcome::Cancel,
+        }
     }
-    Ok(if done > not_done {
+    if done > not_done {
         Outcome::Settle
     } else {
         Outcome::Cancel
-    })
+    }
 }
 
 #[cfg(test)]
@@ -96,7 +94,7 @@ mod tests {
             } else {
                 Outcome::Cancel
             };
-            prop_assert_eq!(verdict(&vs).unwrap(), expected);
+            prop_assert_eq!(verdict(&vs), expected);
         }
 
         // Determinism: same votes, same verdict.
@@ -108,7 +106,7 @@ mod tests {
 
     #[test]
     fn empty_vote_cancels() {
-        assert_eq!(verdict(&[]).unwrap(), Outcome::Cancel);
+        assert_eq!(verdict(&[]), Outcome::Cancel);
     }
 
     #[test]
@@ -117,7 +115,7 @@ mod tests {
             vote(0, Choice::Done, 500_000),
             vote(1, Choice::NotDone, 500_000),
         ];
-        assert_eq!(verdict(&vs).unwrap(), Outcome::Cancel);
+        assert_eq!(verdict(&vs), Outcome::Cancel);
     }
 
     #[test]
@@ -126,12 +124,15 @@ mod tests {
             vote(0, Choice::Done, 500_001),
             vote(1, Choice::NotDone, 500_000),
         ];
-        assert_eq!(verdict(&vs).unwrap(), Outcome::Settle);
+        assert_eq!(verdict(&vs), Outcome::Settle);
     }
 
+    // The tally is total: an overflowing sum decides (Cancel), it never
+    // strands the task in VOTING — a broken tally must not lock even the
+    // operator's refund door.
     #[test]
-    fn overflow_is_an_error() {
+    fn overflow_cancels() {
         let vs = [vote(0, Choice::Done, u128::MAX), vote(1, Choice::Done, 1)];
-        assert_eq!(verdict(&vs), Err(VerdictError::Overflow));
+        assert_eq!(verdict(&vs), Outcome::Cancel);
     }
 }

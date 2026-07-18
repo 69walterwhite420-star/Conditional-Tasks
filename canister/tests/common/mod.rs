@@ -85,7 +85,12 @@ pub fn setup() -> (PocketIc, Principal) {
         crown_index: None,
         operator_wallet: Some(ByteBuf::from(operator().address)),
     };
-    pic.install_canister(canister, game_wasm(), Encode!(&Some(overrides)).unwrap(), None);
+    pic.install_canister(
+        canister,
+        game_wasm(),
+        Encode!(&Some(overrides)).unwrap(),
+        None,
+    );
     warm_up(&pic, canister);
     (pic, canister)
 }

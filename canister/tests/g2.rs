@@ -63,7 +63,11 @@ fn full_flow_with_certificates() {
         &pic,
         canister,
         "list_tasks",
-        Encode!(&CHAIN.to_string(), &ByteBuf::from(recipient.address.clone())).unwrap(),
+        Encode!(
+            &CHAIN.to_string(),
+            &ByteBuf::from(recipient.address.clone())
+        )
+        .unwrap(),
     );
     assert_eq!(ids, vec![ByteBuf::from(registered.task_id)]);
 
@@ -410,7 +414,11 @@ fn channel_params_counter_and_floor() {
         &pic,
         canister,
         "get_profile",
-        Encode!(&CHAIN.to_string(), &ByteBuf::from(recipient.address.clone())).unwrap(),
+        Encode!(
+            &CHAIN.to_string(),
+            &ByteBuf::from(recipient.address.clone())
+        )
+        .unwrap(),
     );
     let profile = profile.unwrap();
     assert_eq!((profile.min_gross, profile.counter), (2_000_000, 1));

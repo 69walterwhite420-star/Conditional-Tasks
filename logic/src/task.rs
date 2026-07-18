@@ -5,12 +5,12 @@
 //! `Tick` is the identity action: pure time, nothing else. A failed action
 //! therefore still applies due time transitions — the caller relies on it.
 
-use crate::verdict::{Outcome, VerdictError, verdict};
+use crate::verdict::{Outcome, verdict};
 use crate::vote::{MIN_VOTE_WEIGHT, Vote};
 
 /// Version of the game rules. Bumped only by a conscious change to the
 /// machine or the verdict rule; the canister reports it via query.
-pub const LOGIC_VERSION: u32 = 2;
+pub const LOGIC_VERSION: u32 = 3;
 
 /// All times are unix seconds; time is always an argument, never a syscall.
 /// The voting period is a birth parameter of the task (profile-scoped in the
@@ -212,9 +212,12 @@ fn advance(task: &mut Task, now: u64) -> Result<(), StepError> {
                 .checked_add(task.voting_period)
                 .ok_or(StepError::Overflow)?;
             if now >= end {
-                let outcome =
-                    verdict(&task.votes).map_err(|VerdictError::Overflow| StepError::Overflow)?;
-                task.state = State::Decided { outcome };
+                // Infallible: a voting task always finalizes at period end —
+                // even an overflowing tally decides (Cancel), never strands
+                // (verdict.rs).
+                task.state = State::Decided {
+                    outcome: verdict(&task.votes),
+                };
             }
             Ok(())
         }
@@ -733,6 +736,6 @@ mod tests {
     // The rules are versioned; changing semantics without bumping is a bug.
     #[test]
     fn logic_version_is_pinned() {
-        assert_eq!(LOGIC_VERSION, 2);
+        assert_eq!(LOGIC_VERSION, 3);
     }
 }

@@ -210,7 +210,9 @@ pub fn derive_task_id(
     nonce: u64,
 ) -> Result<Vec<u8>, AuthError> {
     let donor: [u8; 32] = donor.try_into().map_err(|_| AuthError::BadFieldLength)?;
-    let recipient: [u8; 32] = recipient.try_into().map_err(|_| AuthError::BadFieldLength)?;
+    let recipient: [u8; 32] = recipient
+        .try_into()
+        .map_err(|_| AuthError::BadFieldLength)?;
     let resolver: [u8; 32] = resolver.try_into().map_err(|_| AuthError::BadFieldLength)?;
     // The on-chain program takes deadline as i64; out-of-range is caught here.
     let deadline = i64::try_from(deadline).map_err(|_| AuthError::DeadlineOverflow)?;
