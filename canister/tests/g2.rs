@@ -27,7 +27,7 @@ fn full_flow_with_certificates() {
     assert_eq!(record.donor.as_slice(), donor.address.as_slice());
     verify_certified_task(&pic, canister, &task);
 
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "accept",
@@ -43,7 +43,7 @@ fn full_flow_with_certificates() {
     );
     verify_certified_task(&pic, canister, &task);
 
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "ready",
@@ -83,7 +83,7 @@ fn foreign_signatures_are_rejected() {
     let b = register(&pic, canister, &donor, &recipient.address, 2).unwrap();
 
     // A stranger's key is not the recipient.
-    let error = streamer_call(
+    let error = recipient_call(
         &pic,
         canister,
         "accept",
@@ -94,7 +94,7 @@ fn foreign_signatures_are_rejected() {
     .unwrap_err();
     assert_eq!(error, "bad signature");
     // The donor's key is not the recipient either.
-    let error = streamer_call(
+    let error = recipient_call(
         &pic,
         canister,
         "accept",
@@ -269,7 +269,7 @@ fn time_expires_tasks_with_and_without_the_timer() {
         }
     );
 
-    let error = streamer_call(
+    let error = recipient_call(
         &pic,
         canister,
         "accept",
@@ -296,7 +296,7 @@ fn empty_voting_cancels_by_timer() {
     let recipient = wallet(2);
 
     let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "accept",
@@ -305,7 +305,7 @@ fn empty_voting_cancels_by_timer() {
         &recipient,
     )
     .unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "ready",
@@ -336,7 +336,7 @@ fn decline_after_accept_frees_the_task() {
     let recipient = wallet(2);
 
     let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "accept",
@@ -345,7 +345,7 @@ fn decline_after_accept_frees_the_task() {
         &recipient,
     )
     .unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "decline",
@@ -362,7 +362,7 @@ fn decline_after_accept_frees_the_task() {
         }
     );
     // Replay of the same decline changes nothing and reports the dead state.
-    let error = streamer_call(
+    let error = recipient_call(
         &pic,
         canister,
         "decline",
@@ -441,7 +441,7 @@ fn operator_refund_cancels_and_attributes() {
     let recipient = wallet(2);
 
     let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "operator_refund",
@@ -478,7 +478,7 @@ fn operator_refund_cancels_and_attributes() {
     assert!(signed, "verdict signature never swept");
 
     // Replay is a no-op on the dead task; the attribution stays.
-    let error = streamer_call(
+    let error = recipient_call(
         &pic,
         canister,
         "operator_refund",
@@ -503,7 +503,7 @@ fn operator_refund_works_mid_voting() {
     let recipient = wallet(2);
 
     let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "accept",
@@ -512,7 +512,7 @@ fn operator_refund_works_mid_voting() {
         &recipient,
     )
     .unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "ready",
@@ -523,7 +523,7 @@ fn operator_refund_works_mid_voting() {
     .unwrap();
 
     // VOTING is closed to the recipient's decline but open to the operator.
-    let error = streamer_call(
+    let error = recipient_call(
         &pic,
         canister,
         "decline",
@@ -533,7 +533,7 @@ fn operator_refund_works_mid_voting() {
     )
     .unwrap_err();
     assert_eq!(error, "invalid transition");
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "operator_refund",
@@ -562,7 +562,7 @@ fn operator_refund_rejects_foreign_wallets() {
     let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
     // Neither the recipient nor a stranger holds the operator's pen.
     for signer in [&recipient, &wallet(9)] {
-        let error = streamer_call(
+        let error = recipient_call(
             &pic,
             canister,
             "operator_refund",

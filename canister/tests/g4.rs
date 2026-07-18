@@ -57,7 +57,7 @@ fn cancel_verdict_is_signed_for_the_contract() {
     assert_eq!(resolver.len(), 32);
 
     let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "decline",
@@ -94,7 +94,7 @@ fn settle_verdict_is_signed_after_votes() {
     seed_reputation(&pic, index, &voter.address, &recipient.address, 5_000_000);
 
     let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "accept",
@@ -103,7 +103,7 @@ fn settle_verdict_is_signed_after_votes() {
         &recipient,
     )
     .unwrap();
-    streamer_call(
+    recipient_call(
         &pic,
         canister,
         "ready",

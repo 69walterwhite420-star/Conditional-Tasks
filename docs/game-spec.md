@@ -132,7 +132,7 @@ canister: vizcg-th777-77774-qaaea-cai
 task: 3tjoUqMwgUcyfWqYvDMGRY5gBXPNPKyY3gErYhJGqxcu
 ```
 
-`register` добавляет `text:` (hex обязательства) и `duration:`; `vote` — `choice: done|not_done`; `set-channel-params` вместо `task:` несёт `streamer:`, значения и монотонный счётчик (иначе старая подпись проигрывается заново).
+`register` добавляет `text:` (hex обязательства) и `duration:`; `vote` — `choice: done|not_done`; `set-profile` вместо `task:` несёт `recipient:`, значения и монотонный счётчик (иначе старая подпись проигрывается заново).
 
 Кодирование инъективно: ключи фиксированы и упорядочены, действие определяет набор строк, а перевод строки не может попасть в значение — адреса это base58, хеши hex, числа десятичные, слова из закрытого словаря, а `validate_config` не даёт существовать конфигу с иным `chain id`. Точные строки запиннены юнит-тестами `auth.rs`; клиент (Crown-Lab) сверяется с теми же векторами.
 
@@ -177,8 +177,8 @@ task: 3tjoUqMwgUcyfWqYvDMGRY5gBXPNPKyY3gErYhJGqxcu
 
 ## 6. Голосование
 
-- **Право голоса:** `book[(chain, voter, streamer)] ≥ MIN_VOTE_WEIGHT`. Порог — накопленная репутация, не платёж.
-- **Вес голоса:** значение из книги в момент обработки голоса. Запрос — межканистерный вызов `get_reputation(chain, voter, streamer)` к `crown-index`; исполняется реплицированно, сертификат не нужен.
+- **Право голоса:** `book[(chain, voter, recipient)] ≥ MIN_VOTE_WEIGHT`. Порог — накопленная репутация, не платёж.
+- **Вес голоса:** значение из книги в момент обработки голоса. Запрос — межканистерный вызов `get_reputation(chain, voter, recipient)` к `crown-index`; исполняется реплицированно, сертификат не нужен.
 - **Выбор:** «выполнено» / «не выполнено».
 - Один адрес — один голос **на задание**. Дедуп по `(task_id, address)`, проверяется до запроса веса.
 - Голос — подпись кошельком, ingress-вызов в канистру. Сервер в пути голоса не стоит.
@@ -257,7 +257,7 @@ fee_wallet = "3it64…"                        # кошелёк создател
 
 ```
    ДОНОР
-     │ create_escrow(streamer, gross, deadline, resolver, nonce)
+     │ create_escrow(recipient, gross, deadline, resolver, nonce)
      ▼
   ФАБРИКА ── PDA [b"escrow", salt] ──► ЭСКРОУ
      │          salt = hash(все поля рождения)           ▲
@@ -277,7 +277,7 @@ fee_wallet = "3it64…"                        # кошелёк создател
   кто угодно ── refund() ──► ЭСКРОУ ──► DONOR     строго после DEADLINE, без подписи
 ```
 
-`DONOR` — подписант `create_escrow`, не параметр. `salt = sha256(donor ‖ streamer ‖ gross_le ‖ deadline_le ‖ resolver ‖ nonce_le)` считается ончейн. `nonce` задаёт донор: два задания с одинаковыми полями дали бы один адрес, второе рождение ревертнулось бы.
+`DONOR` — подписант `create_escrow`, не параметр. `salt = sha256(donor ‖ recipient ‖ gross_le ‖ deadline_le ‖ resolver ‖ nonce_le)` считается ончейн. `nonce` задаёт донор: два задания с одинаковыми полями дали бы один адрес, второе рождение ревертнулось бы.
 
 **Что подписывает канистра.** Единственный интерфейс игры с контрактом, побайтово:
 

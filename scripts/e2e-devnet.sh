@@ -23,9 +23,9 @@ cd "$(dirname "$0")/.."
 
 SOL_RPC_URL=${SOL_RPC_URL:-https://api.devnet.solana.com}
 SOL_DONOR_KEYPAIR=${SOL_DONOR_KEYPAIR:-$HOME/.cache/crown-e2e/donor.json}
-# The streamer's permanent key: payouts and its ATA rent stay recoverable
+# The recipient's permanent key: payouts and its ATA rent stay recoverable
 # between runs instead of burning with a throwaway key.
-SOL_STREAMER_KEYPAIR=${SOL_STREAMER_KEYPAIR:-$HOME/.cache/crown-e2e/streamer.json}
+SOL_RECIPIENT_KEYPAIR=${SOL_RECIPIENT_KEYPAIR:-$HOME/.cache/crown-e2e/recipient.json}
 CORE=$(cd ../../Crown-Core && pwd)
 
 VOTING_PERIOD=$(grep "^voting_period" config/testnet.toml | cut -d"=" -f2 | tr -d " ")
@@ -76,7 +76,7 @@ else:
 
 game_call() { dfx canister call conditional-tasks "$@"; }
 resolver_hex() { game_call get_resolver '("solana-devnet")' --query --output json | opt_blob_hex; }
-reputation() { # payer_blob streamer_blob
+reputation() { # payer_blob recipient_blob
     dfx canister call crown-index get_reputation "(\"solana-devnet\", blob \"$1\", blob \"$2\")" \
         --query | tr -d '(_ )' | sed 's/:nat//'
 }
@@ -115,13 +115,13 @@ sign_and_call() { # method task_id_hex signer_keypair   (method == action word)
 core_value() { grep "^$1" "$CORE/config/testnet.toml" | head -1 | cut -d'=' -f2- | tr -d ' "[]'; }
 SPLITTER=$(core_value splitter)
 
-[ -f "$SOL_STREAMER_KEYPAIR" ] || solana-keygen new --no-bip39-passphrase --silent -o "$SOL_STREAMER_KEYPAIR"
-STREAMER=$(solana-keygen pubkey "$SOL_STREAMER_KEYPAIR")
+[ -f "$SOL_RECIPIENT_KEYPAIR" ] || solana-keygen new --no-bip39-passphrase --silent -o "$SOL_RECIPIENT_KEYPAIR"
+RECIPIENT=$(solana-keygen pubkey "$SOL_RECIPIENT_KEYPAIR")
 DONOR=$(solana-keygen pubkey "$SOL_DONOR_KEYPAIR")
 DONOR_HEX=$(b58_hex "$DONOR")
-STREAMER_HEX=$(b58_hex "$STREAMER")
+RECIPIENT_HEX=$(b58_hex "$RECIPIENT")
 
-echo "donor=$DONOR streamer=$STREAMER"
+echo "donor=$DONOR recipient=$RECIPIENT"
 
 # ---- replica and canisters ------------------------------------------------
 
@@ -182,7 +182,7 @@ register_task() { # gross deadline task_id_hex nonce
     game_call register_task "(record {
         chain = \"solana-devnet\";
         donor = blob \"$(blob_hex "$DONOR_HEX")\";
-        streamer = blob \"$(blob_hex "$STREAMER_HEX")\";
+        recipient = blob \"$(blob_hex "$RECIPIENT_HEX")\";
         gross = $gross;
         deadline = $deadline;
         resolver = blob \"$(blob_hex "$RESOLVER")\";
@@ -204,17 +204,17 @@ vote_done() { # task_id_hex
 # ---- acts -----------------------------------------------------------------
 
 echo "== direct donate: the reputation the donor will vote with"
-driver donate "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$STREAMER" "$SOL_DONATE"
-DONOR_BLOB=$(blob_hex "$DONOR_HEX"); STREAMER_BLOB=$(blob_hex "$STREAMER_HEX")
+driver donate "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$RECIPIENT" "$SOL_DONATE"
+DONOR_BLOB=$(blob_hex "$DONOR_HEX"); RECIPIENT_BLOB=$(blob_hex "$RECIPIENT_HEX")
 
 DEADLINE=$(($(date +%s) + DURATION + VOTING_PERIOD + MARGIN + 600))
 
 echo "== act B (cancel): create, register, decline"
-B=$(driver create "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$STREAMER" "$B_GROSS" "$DEADLINE" "$RESOLVER" "$FEE_BPS" "$FEE_WALLET" "$NONCE")
+B=$(driver create "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$RECIPIENT" "$B_GROSS" "$DEADLINE" "$RESOLVER" "$FEE_BPS" "$FEE_WALLET" "$NONCE")
 B_HEX=$(b58_hex "$B")
 echo "escrow B=$B"
 register_task "$B_GROSS" "$DEADLINE" "$B_HEX" "$NONCE"
-sign_and_call decline "$B_HEX" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
+sign_and_call decline "$B_HEX" "$SOL_RECIPIENT_KEYPAIR" | grep -q Ok
 
 SIG_B=""
 for _ in $(seq 1 20); do
@@ -235,28 +235,28 @@ driver claim "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$B" 1 "$SIG_B" "$RESOLVER"
 [ "$(driver balance "$SOL_RPC_URL" "$DONOR")" = "$((BEFORE + B_GROSS))" ] || { echo "FAIL: cancel refund"; exit 1; }
 
 echo "== act C, outside the game: refund() moves money, never the book"
-C=$(driver create "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$STREAMER" "$C_GROSS" $(($(date +%s) + 25)) "$RESOLVER" "$FEE_BPS" "$FEE_WALLET" $((NONCE + 1)))
+C=$(driver create "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$RECIPIENT" "$C_GROSS" $(($(date +%s) + 25)) "$RESOLVER" "$FEE_BPS" "$FEE_WALLET" $((NONCE + 1)))
 echo "escrow C=$C"
 sleep 30
 driver refund "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$C"
 
 echo "== the donate ingest must land before the vote"
 for _ in $(seq 1 90); do
-    REP=$(reputation "$DONOR_BLOB" "$STREAMER_BLOB")
+    REP=$(reputation "$DONOR_BLOB" "$RECIPIENT_BLOB")
     echo "reputation: $REP/$SOL_DONATE"
     [ "$REP" = "$SOL_DONATE" ] && break
     sleep 10
 done
 [ "$REP" = "$SOL_DONATE" ] || { echo "FAIL: donate not ingested"; exit 1; }
 
-echo "== act A (settle): create, register, accept, done, vote"
+echo "== act A (settle): create, register, accept, ready, vote"
 DEADLINE=$(($(date +%s) + DURATION + VOTING_PERIOD + MARGIN + 600))
-A=$(driver create "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$STREAMER" "$A_GROSS" "$DEADLINE" "$RESOLVER" "$FEE_BPS" "$FEE_WALLET" $((NONCE + 2)))
+A=$(driver create "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$RECIPIENT" "$A_GROSS" "$DEADLINE" "$RESOLVER" "$FEE_BPS" "$FEE_WALLET" $((NONCE + 2)))
 A_HEX=$(b58_hex "$A")
 echo "escrow A=$A"
 register_task "$A_GROSS" "$DEADLINE" "$A_HEX" $((NONCE + 2))
-sign_and_call accept "$A_HEX" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
-sign_and_call done "$A_HEX" "$SOL_STREAMER_KEYPAIR" | grep -q Ok
+sign_and_call accept "$A_HEX" "$SOL_RECIPIENT_KEYPAIR" | grep -q Ok
+sign_and_call ready "$A_HEX" "$SOL_RECIPIENT_KEYPAIR" | grep -q Ok
 VOTING_STARTED=$(date +%s)
 vote_done "$A_HEX"
 
@@ -273,18 +273,18 @@ done
 verdict_json "$A_HEX" | grep -q settle || { echo "FAIL: verdict is not settle"; exit 1; }
 
 echo "== claim(0): the canister's signature moves real money through the splitter"
-STREAMER_BEFORE=$(driver balance "$SOL_RPC_URL" "$STREAMER")
+RECIPIENT_BEFORE=$(driver balance "$SOL_RPC_URL" "$RECIPIENT")
 driver claim "$SOL_RPC_URL" "$SOL_DONOR_KEYPAIR" "$A" 0 "$SIG_A" "$RESOLVER"
 A_FEE=$((A_GROSS * FEE_BPS / 10000))
 A_PAYOUT=$((A_GROSS - A_FEE))
-[ "$(driver balance "$SOL_RPC_URL" "$STREAMER")" = "$((STREAMER_BEFORE + A_PAYOUT))" ] || { echo "FAIL: payout"; exit 1; }
+[ "$(driver balance "$SOL_RPC_URL" "$RECIPIENT")" = "$((RECIPIENT_BEFORE + A_PAYOUT))" ] || { echo "FAIL: payout"; exit 1; }
 
 echo "== the book credits the DONOR for the game settlement"
-# The book sees exactly what reached the streamer: the direct donate whole,
+# The book sees exactly what reached the recipient: the direct donate whole,
 # the game settlement net of the game's fee.
 TOTAL=$((SOL_DONATE + A_GROSS - A_GROSS * FEE_BPS / 10000))
 for _ in $(seq 1 90); do
-    REP=$(reputation "$DONOR_BLOB" "$STREAMER_BLOB")
+    REP=$(reputation "$DONOR_BLOB" "$RECIPIENT_BLOB")
     echo "book: $REP/$TOTAL"
     [ "$REP" = "$TOTAL" ] && break
     sleep 10

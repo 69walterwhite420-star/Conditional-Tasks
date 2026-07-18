@@ -237,7 +237,7 @@ pub fn register(
     })
 }
 
-pub fn streamer_call(
+pub fn recipient_call(
     pic: &PocketIc,
     canister: Principal,
     method: &str,

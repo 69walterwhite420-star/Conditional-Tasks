@@ -22,7 +22,7 @@ fn task_in_voting(
     nonce: u64,
 ) -> Vec<u8> {
     let r = register(pic, game, donor, &recipient.address, nonce).unwrap();
-    streamer_call(
+    recipient_call(
         pic,
         game,
         "accept",
@@ -31,7 +31,7 @@ fn task_in_voting(
         recipient,
     )
     .unwrap();
-    streamer_call(pic, game, "ready", auth::Action::Ready, &r.task_id, recipient).unwrap();
+    recipient_call(pic, game, "ready", auth::Action::Ready, &r.task_id, recipient).unwrap();
     r.task_id
 }
 
