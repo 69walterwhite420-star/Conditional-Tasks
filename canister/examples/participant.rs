@@ -52,7 +52,7 @@ fn main() {
                 }
                 "accept" => Action::Accept,
                 "decline" => Action::Decline,
-                "done" => Action::Done,
+                "ready" => Action::Ready,
                 "vote" => Action::Vote(match args[6].as_str() {
                     "done" => Choice::Done,
                     "not_done" => Choice::NotDone,

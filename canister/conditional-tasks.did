@@ -1,5 +1,5 @@
-// Update surface is frozen: only {register_task, accept, decline, done,
-// vote, set_channel_params, operator_refund} may ever appear as non-query
+// Update surface is frozen: only {register_task, accept, decline, ready,
+// vote, set_profile, operator_refund} may ever appear as non-query
 // methods; the CI lint fails on anything else.
 
 type Outcome = variant { settle; cancel };
@@ -15,7 +15,7 @@ type Task = record {
   chain : text;
   task_id : blob;
   donor : blob;
-  streamer : blob;
+  recipient : blob;
   gross : nat64;
   deadline : nat64;
   resolver : blob;
@@ -31,7 +31,7 @@ type Task = record {
   // operator; attribution, certified forever.
   operator_refunded_at : opt nat64;
 };
-type Channel = record {
+type Profile = record {
   min_gross : nat64;
   min_reputation : nat;
   enabled : bool;
@@ -49,7 +49,7 @@ type Verdict = record {
 type RegisterArg = record {
   chain : text;
   donor : blob;
-  streamer : blob;
+  recipient : blob;
   gross : nat64;
   deadline : nat64;
   resolver : blob;
@@ -70,9 +70,9 @@ type VoteArg = record {
   choice : Choice;
   signature : blob;
 };
-type ChannelArg = record {
+type ProfileArg = record {
   chain : text;
-  streamer : blob;
+  recipient : blob;
   min_gross : nat64;
   min_reputation : nat;
   enabled : bool;
@@ -92,13 +92,13 @@ service : (opt Overrides) -> {
   register_task : (RegisterArg) -> (RegisterResult);
   accept : (ActionArg) -> (ActionResult);
   decline : (ActionArg) -> (ActionResult);
-  done : (ActionArg) -> (ActionResult);
+  ready : (ActionArg) -> (ActionResult);
   vote : (VoteArg) -> (ActionResult);
-  set_channel_params : (ChannelArg) -> (ActionResult);
+  set_profile : (ProfileArg) -> (ActionResult);
   operator_refund : (ActionArg) -> (ActionResult);
   get_task : (text, blob) -> (opt CertifiedTask) query;
   list_tasks : (text, blob) -> (vec blob) query;
-  get_channel : (text, blob) -> (opt Channel) query;
+  get_profile : (text, blob) -> (opt Profile) query;
   get_resolver : (text) -> (opt blob) query;
   get_verdict : (text, blob) -> (opt Verdict) query;
   get_logic_version : () -> (nat32) query;

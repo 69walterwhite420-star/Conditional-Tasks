@@ -65,7 +65,7 @@ pub enum Action {
     /// Recipient bows out — allowed from CREATED and ACCEPTED, costs nothing.
     Decline,
     /// Recipient claims completion; voting starts.
-    Done,
+    Ready,
     /// A reputation holder votes.
     Vote(Vote),
     /// The platform operator forces the refund verdict — the censorship
@@ -149,7 +149,7 @@ pub fn step(task: &mut Task, action: Action, now: u64) -> Result<(), StepError> 
                 outcome: Outcome::Cancel,
             })
         }
-        (State::Accepted, Action::Done) => Some(State::Voting { started_at: now }),
+        (State::Accepted, Action::Ready) => Some(State::Voting { started_at: now }),
         (State::Created, Action::OperatorRefund)
         | (State::Accepted, Action::OperatorRefund)
         | (State::Voting { .. }, Action::OperatorRefund) => Some(State::Decided {
@@ -170,16 +170,16 @@ pub fn step(task: &mut Task, action: Action, now: u64) -> Result<(), StepError> 
         | (State::Voting { .. }, Action::Tick)
         | (State::Decided { .. }, Action::Tick) => None,
         // Everything not drawn on the diagram (docs/game-spec.md §3).
-        (State::Created, Action::Done)
+        (State::Created, Action::Ready)
         | (State::Created, Action::Vote(_))
         | (State::Accepted, Action::Accept)
         | (State::Accepted, Action::Vote(_))
         | (State::Voting { .. }, Action::Accept)
         | (State::Voting { .. }, Action::Decline)
-        | (State::Voting { .. }, Action::Done)
+        | (State::Voting { .. }, Action::Ready)
         | (State::Decided { .. }, Action::Accept)
         | (State::Decided { .. }, Action::Decline)
-        | (State::Decided { .. }, Action::Done)
+        | (State::Decided { .. }, Action::Ready)
         | (State::Decided { .. }, Action::Vote(_))
         | (State::Decided { .. }, Action::OperatorRefund) => {
             return Err(StepError::InvalidTransition);
@@ -287,7 +287,7 @@ mod tests {
         prop_oneof![
             Just(Action::Accept),
             Just(Action::Decline),
-            Just(Action::Done),
+            Just(Action::Ready),
             Just(Action::OperatorRefund),
             Just(Action::Tick),
             (0u8..4, any::<bool>(), 0u128..=u128::from(u64::MAX)).prop_map(
@@ -337,10 +337,10 @@ mod tests {
     }
 
     #[test]
-    fn done_opens_voting() {
+    fn ready_opens_voting() {
         let mut task = fresh();
         step(&mut task, Action::Accept, T0 + 1).unwrap();
-        step(&mut task, Action::Done, T0 + 2).unwrap();
+        step(&mut task, Action::Ready, T0 + 2).unwrap();
         assert_eq!(task.state, State::Voting { started_at: T0 + 2 });
     }
 
@@ -356,7 +356,7 @@ mod tests {
         };
         let voting = || {
             let mut t = accepted();
-            step(&mut t, Action::Done, now).unwrap();
+            step(&mut t, Action::Ready, now).unwrap();
             t
         };
         let decided = || {
@@ -368,7 +368,7 @@ mod tests {
             vec![
                 Action::Accept,
                 Action::Decline,
-                Action::Done,
+                Action::Ready,
                 Action::Vote(valid_vote(0, Choice::Done)),
                 Action::OperatorRefund,
                 Action::Tick,
@@ -388,7 +388,7 @@ mod tests {
                 accepted(),
                 vec![
                     Action::Decline,
-                    Action::Done,
+                    Action::Ready,
                     Action::OperatorRefund,
                     Action::Tick,
                 ],
@@ -439,7 +439,7 @@ mod tests {
         let mut task = fresh();
         step(&mut task, Action::Accept, expiry - 1).unwrap();
         assert_eq!(
-            step(&mut task, Action::Done, expiry),
+            step(&mut task, Action::Ready, expiry),
             Err(StepError::InvalidTransition)
         );
         assert_eq!(
@@ -461,7 +461,7 @@ mod tests {
     fn voting_end_tallies_and_rejects_late_votes() {
         let mut task = fresh();
         step(&mut task, Action::Accept, T0 + 1).unwrap();
-        step(&mut task, Action::Done, T0 + 2).unwrap();
+        step(&mut task, Action::Ready, T0 + 2).unwrap();
         step(&mut task, Action::Vote(valid_vote(0, Choice::Done)), T0 + 3).unwrap();
         let end = T0 + 2 + VOTING_PERIOD;
         assert_eq!(
@@ -481,7 +481,7 @@ mod tests {
     fn empty_voting_cancels_on_tick() {
         let mut task = fresh();
         step(&mut task, Action::Accept, T0 + 1).unwrap();
-        step(&mut task, Action::Done, T0 + 2).unwrap();
+        step(&mut task, Action::Ready, T0 + 2).unwrap();
         step(&mut task, Action::Tick, T0 + 2 + VOTING_PERIOD).unwrap();
         assert_eq!(
             task.state,
@@ -518,7 +518,7 @@ mod tests {
 
         let mut task = fresh();
         step(&mut task, Action::Accept, T0 + 1).unwrap();
-        step(&mut task, Action::Done, T0 + 2).unwrap();
+        step(&mut task, Action::Ready, T0 + 2).unwrap();
         step(&mut task, Action::Vote(valid_vote(0, Choice::Done)), T0 + 3).unwrap();
         step(&mut task, Action::OperatorRefund, T0 + 4).unwrap();
         assert_eq!(
@@ -536,7 +536,7 @@ mod tests {
         // cannot flip the tallied settle.
         let mut task = fresh();
         step(&mut task, Action::Accept, T0 + 1).unwrap();
-        step(&mut task, Action::Done, T0 + 2).unwrap();
+        step(&mut task, Action::Ready, T0 + 2).unwrap();
         step(&mut task, Action::Vote(valid_vote(0, Choice::Done)), T0 + 3).unwrap();
         let end = T0 + 2 + VOTING_PERIOD;
         assert_eq!(
@@ -557,7 +557,7 @@ mod tests {
     fn vote_below_threshold_and_duplicates_are_rejected() {
         let mut task = fresh();
         step(&mut task, Action::Accept, T0 + 1).unwrap();
-        step(&mut task, Action::Done, T0 + 2).unwrap();
+        step(&mut task, Action::Ready, T0 + 2).unwrap();
 
         assert_eq!(
             step(

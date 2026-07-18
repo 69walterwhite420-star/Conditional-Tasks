@@ -46,8 +46,8 @@ fn full_flow_with_certificates() {
     streamer_call(
         &pic,
         canister,
-        "done",
-        auth::Action::Done,
+        "ready",
+        auth::Action::Ready,
         &registered.task_id,
         &recipient,
     )
@@ -308,8 +308,8 @@ fn empty_voting_cancels_by_timer() {
     streamer_call(
         &pic,
         canister,
-        "done",
-        auth::Action::Done,
+        "ready",
+        auth::Action::Ready,
         &r.task_id,
         &recipient,
     )
@@ -515,8 +515,8 @@ fn operator_refund_works_mid_voting() {
     streamer_call(
         &pic,
         canister,
-        "done",
-        auth::Action::Done,
+        "ready",
+        auth::Action::Ready,
         &r.task_id,
         &recipient,
     )

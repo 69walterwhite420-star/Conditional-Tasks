@@ -10,7 +10,7 @@
 | `logic` не знает про чейн и криптографию | адреса и ключи — непрозрачные байты | `grep -riE 'solana\|ed25519\|sha256\|candid' logic/src/` пусто |
 | Канистра не двигает деньги | нет переводов, нет знания о сплиттере и казне | `grep -riE 'transfer\|approve\|splitter\|treasury' canister/src/` пусто |
 | Канистра не читает внешние сети | нет outcalls, нет RPC-канистр | `grep -r 'http_request' canister/src/` пусто; внешние вызовы только к management canister и `crown_index` из конфига |
-| Update-поверхность фиксирована | семь методов | парсер `.did` падает на update вне `{register_task, accept, decline, done, vote, set_channel_params, operator_refund}` |
+| Update-поверхность фиксирована | семь методов | парсер `.did` падает на update вне `{register_task, accept, decline, ready, vote, set_profile, operator_refund}` |
 | Авторизация не по principal | только подпись кошелька | `grep -r 'caller()' canister/src/` не встречается в проверках прав |
 | Ядро и фабрика не тронуты | отдельный репозиторий | CI падает, если в PR есть путь `crown-core/` или `crown-factory/` |
 

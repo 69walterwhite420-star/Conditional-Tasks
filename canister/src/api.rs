@@ -169,8 +169,8 @@ fn decline(arg: ActionArg) -> Result<(), String> {
 }
 
 #[ic_cdk::update]
-fn done(arg: ActionArg) -> Result<(), String> {
-    recipient_action(arg, logic::Action::Done, auth::Action::Done)
+fn ready(arg: ActionArg) -> Result<(), String> {
+    recipient_action(arg, logic::Action::Ready, auth::Action::Ready)
 }
 
 /// The platform operator's censorship move (game-spec §9): forces the

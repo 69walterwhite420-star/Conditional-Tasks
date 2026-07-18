@@ -40,7 +40,7 @@
 2. `grep -rE 'ic_cdk|std::(fs|net|time)|reqwest' logic/src/` → пусто.
 3. `grep -riE 'solana|ed25519|sha256|candid' logic/src/` → пусто. Логика не знает про чейн и криптографию.
 4. `grep -riE 'transfer|approve|splitter|treasury' canister/src/` → пусто; `grep -r 'http_request' canister/src/` → пусто. Канистра не двигает деньги и не читает внешние сети.
-5. Парсер `.did`: update-методы — ровно `{register_task, accept, decline, done, vote, set_channel_params, operator_refund}`. Любой сверх списка роняет CI.
+5. Парсер `.did`: update-методы — ровно `{register_task, accept, decline, ready, vote, set_profile, operator_refund}`. Любой сверх списка роняет CI.
 
 **DoD.** Дерево совпадает с картой в `CLAUDE.md`. Пять линтов зелёные на пустом репозитории. Ни одного сетевого значения, адреса или principal в коде.
 
@@ -75,12 +75,12 @@
 
 **Вход.** game-spec §3, §4, §5, §7.
 
-**Выход.** Канистра поверх `logic`. Update-методы: `register_task`, `accept`, `decline`, `done`, `set_channel_params`. Проверка Ed25519-подписей кошельков над сообщением game-spec §4. `task_id` выводится через `crown-derive` из полей рождения и конфига. Таймеры: истечение `duration` переводит задание в `cancel`-вердикт без чьего-либо вызова. Состояние — в стабильной памяти; корень состояния — в `set_certified_data`, `query` отдаёт `data_certificate()`.
+**Выход.** Канистра поверх `logic`. Update-методы: `register_task`, `accept`, `decline`, `ready`, `set_profile`. Проверка Ed25519-подписей кошельков над сообщением game-spec §4. `task_id` выводится через `crown-derive` из полей рождения и конфига. Таймеры: истечение `duration` переводит задание в `cancel`-вердикт без чьего-либо вызова. Состояние — в стабильной памяти; корень состояния — в `set_certified_data`, `query` отдаёт `data_certificate()`.
 
 **DoD.**
 - `task_id` совпадает с адресом реального эскроу: соль запиннена кросс-инструментальным вектором (python3 hashlib), арифметика адреса — `crown-derive` с его собственным паритетом; канистра и клиент выводят один `task_id`.
 - Регистрация отвергается при: `gross < max(min_gross, флор)`, `duration ∉ [MIN_DURATION, MAX_DURATION]`, `deadline < регистрация + duration + VOTING_PERIOD + DEADLINE_MARGIN`, `enabled = false`, повторный `task_id`.
-- Подписи: чужой ключ, чужое задание, чужая канистра, чужое действие — отвергнуты. Повтор `set_channel_params` со старым счётчиком — отвергнут. `accept`/`decline`/`done` идемпотентны в пределах задания.
+- Подписи: чужой ключ, чужое задание, чужая канистра, чужое действие — отвергнуты. Повтор `set_profile` со старым счётчиком — отвергнут. `accept`/`decline`/`ready` идемпотентны в пределах задания.
 - «Принять» и «отказаться» работают из состояний по диаграмме и только из них; «принять» после `duration` — отказ. Таймерные переходы проверены сдвигом времени (PocketIC).
 - Сертификат состояния проверяется офчейн против root key — есть тест.
 - Линт `.did` зелёный; `vote` ещё не существует.

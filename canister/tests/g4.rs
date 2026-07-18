@@ -106,8 +106,8 @@ fn settle_verdict_is_signed_after_votes() {
     streamer_call(
         &pic,
         canister,
-        "done",
-        auth::Action::Done,
+        "ready",
+        auth::Action::Ready,
         &r.task_id,
         &recipient,
     )

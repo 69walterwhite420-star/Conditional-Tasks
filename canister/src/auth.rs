@@ -43,7 +43,7 @@ pub enum Action<'a> {
     Register { text_hash: &'a [u8], duration: u64 },
     Accept,
     Decline,
-    Done,
+    Ready,
     Vote(Choice),
     OperatorRefund,
 }
@@ -55,7 +55,7 @@ impl Action<'_> {
             Action::Register { .. } => "register",
             Action::Accept => "accept",
             Action::Decline => "decline",
-            Action::Done => "done",
+            Action::Ready => "ready",
             Action::Vote(_) => "vote",
             Action::OperatorRefund => "operator-refund",
         }
@@ -135,7 +135,7 @@ pub fn task_message(chain: &str, canister_id: &str, task_id: &[u8], action: &Act
             out.push_str(&format!("duration: {duration}\n"));
         }
         Action::Vote(choice) => out.push_str(&format!("choice: {}\n", choice.word())),
-        Action::Accept | Action::Decline | Action::Done | Action::OperatorRefund => {}
+        Action::Accept | Action::Decline | Action::Ready | Action::OperatorRefund => {}
     }
     out
 }
@@ -431,7 +431,7 @@ mod tests {
         let messages = [
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Accept),
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Decline),
-            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Done),
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Ready),
             task_message(
                 "solana-devnet",
                 CANISTER,
@@ -481,7 +481,7 @@ mod tests {
         let messages = [
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Accept),
             task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Decline),
-            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Done),
+            task_message("solana-devnet", CANISTER, &[0xCC; 32], &Action::Ready),
             task_message(
                 "solana-devnet",
                 CANISTER,
@@ -551,7 +551,7 @@ mod tests {
         use ed25519_dalek::Signer;
         let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
         let address = key.verifying_key().to_bytes().to_vec();
-        let message = task_message("solana-devnet", CANISTER, &[2; 32], &Action::Done);
+        let message = task_message("solana-devnet", CANISTER, &[2; 32], &Action::Ready);
         let sig = key.sign(message.as_bytes()).to_bytes().to_vec();
         verify_wallet_signature(message.as_bytes(), &sig, &address).unwrap();
 
@@ -565,7 +565,7 @@ mod tests {
             Err(AuthError::BadSignature)
         );
         // Foreign message: same signer, different task.
-        let foreign = task_message("solana-devnet", CANISTER, &[3; 32], &Action::Done);
+        let foreign = task_message("solana-devnet", CANISTER, &[3; 32], &Action::Ready);
         assert_eq!(
             verify_wallet_signature(foreign.as_bytes(), &sig, &address),
             Err(AuthError::BadSignature)
