@@ -237,11 +237,16 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
     auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &arg.voter)
         .map_err(|e| e.text().to_string())?;
 
-    // Time first, persisted: a late timer never extends the window.
+    // Time first, persisted: a late timer never extends the window. An
+    // unchanged tick must not cost a certified write, or it would be a cheap
+    // griefing vector.
+    let before = record.state.clone();
     let mut task = record.to_logic();
     logic::step(&mut task, logic::Action::Tick, crate::now_seconds()).map_err(step_error_text)?;
     record.absorb(&task);
-    crate::save_task(&record);
+    if record.state != before {
+        crate::save_task(&record);
+    }
     if !matches!(record.state, crate::StateView::Voting { .. }) {
         return Err("invalid transition".to_string());
     }
@@ -253,8 +258,10 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
 
     let weight = crate::weight::book_value(&arg.chain, &arg.voter, &record.streamer).await?;
 
-    // The await yielded: reload the truth and let the machine judge.
+    // The await yielded: reload the truth and let the machine judge. Persist
+    // only a real change — a rejected vote must not cost a certified write.
     let mut record = crate::load_task(&key).ok_or_else(|| "unknown task".to_string())?;
+    let before = record.clone();
     let mut task = record.to_logic();
     let result = logic::step(
         &mut task,
@@ -269,7 +276,9 @@ async fn vote(arg: VoteArg) -> Result<(), String> {
         crate::now_seconds(),
     );
     record.absorb(&task);
-    crate::save_task(&record);
+    if record != before {
+        crate::save_task(&record);
+    }
     result.map_err(step_error_text)
 }
 
