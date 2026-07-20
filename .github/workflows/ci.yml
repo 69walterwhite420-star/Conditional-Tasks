@@ -14,7 +14,14 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - run: cargo build --target wasm32-unknown-unknown --release -p conditional-tasks
+      - name: dfx (ships the pocket-ic server the canister tests run against)
+        run: |
+          DFXVM_INIT_YES=true sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
+          echo "$HOME/.local/share/dfx/bin" >> "$GITHUB_PATH"
+      - run: dfx --version
+      # Builds the release wasm and runs the #[ignore]-marked canister tests.
+      # Without this the whole PocketIC layer never runs in CI.
+      - run: ./scripts/test-canister.sh
       - run: ./scripts/lint-boundaries.sh
       - name: core and factory untouched
         run: '! git ls-files | grep -E "^(crown-core|crown-factory)/"'
