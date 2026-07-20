@@ -5,8 +5,20 @@ on: [push, pull_request]
 jobs:
   game:
     runs-on: ubuntu-latest
+    # The canister depends on crown-derive and crown-salt by relative path, so
+    # the checkout has to reproduce the sibling layout those paths expect.
+    # A lone checkout cannot even load the manifest.
+    defaults:
+      run:
+        working-directory: crown-games/Conditional-Tasks
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: crown-games/Conditional-Tasks
+      - uses: actions/checkout@v4
+        with:
+          repository: bocchisan/Crown-Factory
+          path: Crown-Factory
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
