@@ -154,9 +154,16 @@ EOF
     AR_wasm32_unknown_unknown="${AR_WASM32:-$HOME/.cache/solana/v1.53/platform-tools/llvm/bin/llvm-ar}" \
     cargo build --target wasm32-unknown-unknown --release -p crown-index)
 
-dfx stop >/dev/null 2>&1 || true
-dfx start --clean --background
-trap 'dfx stop >/dev/null 2>&1 || true' EXIT
+# THE LOCAL REPLICA IS SHARED AND IS NEVER WIPED HERE: threshold keys born by
+# earlier runs may still resolve live devnet escrows. Reuse a running replica
+# or start one over the existing state, and leave it up.
+if ! dfx ping >/dev/null 2>&1; then
+    echo "== starting the local replica over the EXISTING state (no --clean)"
+    dfx start --background >/dev/null 2>&1
+    for _ in $(seq 1 30); do dfx ping >/dev/null 2>&1 && break; sleep 1; done
+fi
+dfx ping >/dev/null 2>&1 || { echo "FAIL: replica did not come up" >&2; exit 1; }
+
 dfx deploy sol_rpc
 dfx deploy crown-index --argument "(opt record {
     sol_rpc = opt principal \"$(dfx canister id sol_rpc)\";
