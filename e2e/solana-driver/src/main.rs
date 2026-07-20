@@ -8,6 +8,7 @@
 //!   e2e-solana claim   <rpc> <fee_payer.json> <escrow_b58> <outcome> <sig_hex> <resolver_hex32>
 //!   e2e-solana refund  <rpc> <fee_payer.json> <escrow_b58>
 //!   e2e-solana balance <rpc> <owner_b58>
+//!   e2e-solana state   <rpc> <escrow_b58>
 
 use std::str::FromStr;
 
@@ -252,6 +253,18 @@ fn main() {
                     data: factory::instruction::Refund {}.data(),
                 }],
             );
+        }
+        Some("state") => {
+            // `closed gross` — the account outlives its own settlement, so a
+            // verdict nobody executed still reads `false` with the whole
+            // gross long after the task was decided.
+            let [rpc, escrow] = &args[2..] else {
+                panic!("state <rpc> <escrow_b58>");
+            };
+            let rpc = client(rpc);
+            let escrow = Pubkey::from_str(escrow).expect("escrow");
+            let state = escrow_state(&rpc, &escrow);
+            println!("{} {}", state.closed, state.gross);
         }
         Some("balance") => {
             let [rpc, owner] = &args[2..] else {

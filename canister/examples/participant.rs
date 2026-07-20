@@ -7,7 +7,7 @@
 //!
 //! Usage:
 //!   participant task-message <chain> <canister-principal> <task_id_hex> <action> [args]
-//!       action: register <text_hash_hex> <duration> | accept | decline | done
+//!       action: register <text_hash_hex> <duration> | accept | decline | ready
 //!               | vote <done|not_done>
 //!   participant profile-message <chain> <canister> <recipient_hex> <min_gross>
 //!                               <min_reputation> <enabled> <counter>
