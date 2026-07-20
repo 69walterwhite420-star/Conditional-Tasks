@@ -10,7 +10,7 @@ cargo build --target wasm32-unknown-unknown --release \
     --manifest-path canister/tests/mock-index/Cargo.toml
 
 if [ -z "${POCKET_IC_BIN:-}" ]; then
-    POCKET_IC_BIN="$(ls -d "$HOME"/.cache/dfinity/versions/*/pocket-ic 2>/dev/null | sort -V | tail -1)"
+    POCKET_IC_BIN="$(ls -d "$HOME"/.cache/dfinity/versions/*/pocket-ic 2>/dev/null | sort -V | tail -1 || true)"
     export POCKET_IC_BIN
 fi
 [ -x "${POCKET_IC_BIN:-}" ] || {

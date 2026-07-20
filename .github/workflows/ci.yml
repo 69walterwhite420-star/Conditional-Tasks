@@ -26,11 +26,14 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - name: dfx (ships the pocket-ic server the canister tests run against)
+      # The server the PocketIC client talks to, pinned to the version the
+      # tests are verified against. scripts/test-canister.sh honours this.
+      - name: pocket-ic server
         run: |
-          DFXVM_INIT_YES=true sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
-          echo "$HOME/.local/share/dfx/bin" >> "$GITHUB_PATH"
-      - run: dfx --version
+          curl -fsSL https://github.com/dfinity/pocketic/releases/download/13.0.0/pocket-ic-x86_64-linux.gz \
+            | gunzip > "$HOME/pocket-ic"
+          chmod +x "$HOME/pocket-ic"
+          echo "POCKET_IC_BIN=$HOME/pocket-ic" >> "$GITHUB_ENV"
       # Builds the release wasm and runs the #[ignore]-marked canister tests.
       # Without this the whole PocketIC layer never runs in CI.
       - run: ./scripts/test-canister.sh
