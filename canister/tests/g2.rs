@@ -8,8 +8,8 @@ mod common;
 
 use candid::Encode;
 use common::*;
-use conditional_tasks::api::{ActionArg, ProfileArg, RegisterArg};
-use conditional_tasks::{ProfileRecord, auth};
+use conditional_tasks::api::{ActionArg, CertifiedTask, ProfileArg, RegisterArg, VoteArg};
+use conditional_tasks::{ChoiceView, ProfileRecord, auth};
 use conditional_tasks_logic as logic;
 use serde_bytes::ByteBuf;
 
@@ -585,4 +585,94 @@ fn operator_refund_rejects_foreign_wallets() {
     let record = task_state(&fetch_task(&pic, canister, &r.task_id));
     assert_eq!(record.state, conditional_tasks::StateView::Created);
     assert!(record.operator_refunded_at.is_none());
+}
+
+#[test]
+#[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
+fn unknown_tasks_are_refused_and_leave_nothing() {
+    // Every task-scoped update must bounce off a task_id nobody registered,
+    // and must not conjure a record on the way out. A method that
+    // synthesized one instead would let anyone mint tasks — and eventually
+    // verdicts — for escrows the game never saw born.
+    let (pic, canister) = setup();
+    let recipient = wallet(2);
+    let unknown = [0x5Au8; 32];
+
+    for (method, action) in [
+        ("accept", auth::Action::Accept),
+        ("decline", auth::Action::Decline),
+        ("ready", auth::Action::Ready),
+    ] {
+        let error =
+            recipient_call(&pic, canister, method, action, &unknown, &recipient).unwrap_err();
+        assert_eq!(error, "unknown task", "{method}");
+    }
+    // The operator is no exception: the task is looked up before the wallet.
+    let error = recipient_call(
+        &pic,
+        canister,
+        "operator_refund",
+        auth::Action::OperatorRefund,
+        &unknown,
+        &operator(),
+    )
+    .unwrap_err();
+    assert_eq!(error, "unknown task");
+
+    // vote refuses at the same gate, before it ever pays the book for weight.
+    let message = auth::task_message(
+        CHAIN,
+        &canister.to_text(),
+        &unknown,
+        &auth::Action::Vote(auth::Choice::Done),
+    );
+    let arg = VoteArg {
+        chain: CHAIN.to_string(),
+        task_id: ByteBuf::from(unknown.to_vec()),
+        voter: ByteBuf::from(recipient.address.clone()),
+        choice: ChoiceView::Done,
+        signature: ByteBuf::from(sign(&recipient, message.as_bytes())),
+    };
+    let (result,): (Result<(), String>,) = update(&pic, canister, "vote", Encode!(&arg).unwrap());
+    assert_eq!(result.unwrap_err(), "unknown task");
+
+    // Nothing was written by any of them.
+    let (task,): (Option<CertifiedTask>,) = query(
+        &pic,
+        canister,
+        "get_task",
+        Encode!(&CHAIN.to_string(), &ByteBuf::from(unknown.to_vec())).unwrap(),
+    );
+    assert!(task.is_none(), "a refused call created a task");
+}
+
+#[test]
+#[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
+fn text_hash_is_stored_verbatim() {
+    // The commitment is the whole of what the canister knows about the task
+    // text, and the donor's signature covers exactly these bytes. Stored or
+    // served altered, no one could prove the server's text is the text the
+    // donor paid for — and the donor's signature would verify against
+    // nothing.
+    let (pic, canister) = setup();
+    let donor = wallet(1);
+    let recipient = wallet(2);
+
+    let r = register(&pic, canister, &donor, &recipient.address, 1).unwrap();
+    assert_eq!(r.text_hash.len(), 32);
+    let record = task_state(&fetch_task(&pic, canister, &r.task_id));
+    assert_eq!(record.text_hash.as_slice(), r.text_hash.as_slice());
+
+    // It survives the rest of the task's life untouched.
+    recipient_call(
+        &pic,
+        canister,
+        "decline",
+        auth::Action::Decline,
+        &r.task_id,
+        &recipient,
+    )
+    .unwrap();
+    let record = task_state(&fetch_task(&pic, canister, &r.task_id));
+    assert_eq!(record.text_hash.as_slice(), r.text_hash.as_slice());
 }

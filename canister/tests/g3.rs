@@ -258,3 +258,34 @@ fn unconfigured_book_fails_votes_cleanly() {
     let record = task_state(&fetch_task(&pic, game, &task_id));
     assert!(record.votes.is_empty());
 }
+
+#[test]
+#[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
+fn one_address_votes_in_every_task() {
+    // Dedup is keyed by (task, address), never by address alone. Keyed by
+    // address, a voter would be silenced everywhere after their first vote
+    // ever — reputation would buy exactly one vote in the game's lifetime.
+    let (pic, game, index) = setup_with_index();
+    let donor = wallet(1);
+    let recipient = wallet(2);
+    let voter = wallet(3);
+    seed_reputation(&pic, index, &voter.address, &recipient.address, 5_000_000);
+
+    let first = task_in_voting(&pic, game, &donor, &recipient, 1);
+    let second = task_in_voting(&pic, game, &donor, &recipient, 2);
+
+    // The same address, opposite choices, two tasks: both count.
+    cast_vote(&pic, game, &first, &voter, ChoiceView::Done).unwrap();
+    cast_vote(&pic, game, &second, &voter, ChoiceView::NotDone).unwrap();
+
+    for (task_id, choice) in [(&first, ChoiceView::Done), (&second, ChoiceView::NotDone)] {
+        let record = task_state(&fetch_task(&pic, game, task_id));
+        assert_eq!(record.votes.len(), 1);
+        assert_eq!(record.votes[0].voter.as_slice(), voter.address.as_slice());
+        assert_eq!(record.votes[0].choice, choice);
+    }
+
+    // Inside one task the dedup still bites.
+    let error = cast_vote(&pic, game, &first, &voter, ChoiceView::NotDone).unwrap_err();
+    assert_eq!(error, "duplicate voter");
+}

@@ -494,6 +494,30 @@ mod tests {
         );
     }
 
+    /// The clock arithmetic is checked, never wrapping. A due moment that
+    /// does not fit u64 must be reported and leave the task exactly as it
+    /// was: a wrapping add lands the due moment in the past, which decides
+    /// a live task on the spot — cancelling a CREATED one, or tallying a
+    /// voting window that never ended.
+    #[test]
+    fn overflowing_due_times_are_reported_not_wrapped() {
+        let mut task = fresh();
+        task.registered_at = u64::MAX;
+        task.duration = 1;
+        let before = task.clone();
+        assert_eq!(step(&mut task, Action::Accept, 0), Err(StepError::Overflow));
+        assert_eq!(task, before);
+
+        let mut task = fresh();
+        task.state = State::Voting {
+            started_at: u64::MAX,
+        };
+        task.voting_period = 1;
+        let before = task.clone();
+        assert_eq!(step(&mut task, Action::Tick, 0), Err(StepError::Overflow));
+        assert_eq!(task, before);
+    }
+
     // ---- operator -------------------------------------------------------
 
     #[test]
@@ -661,6 +685,18 @@ mod tests {
         assert_eq!(
             register(T0, &ch, 34, VOTING_PERIOD, &tight),
             Err(RegisterError::DeadlineTooTight)
+        );
+    }
+
+    /// The earliest legal deadline is computed with checked arithmetic. If
+    /// it wrapped, a clock this far out would produce a tiny earliest
+    /// deadline that any declared deadline clears — birthing a task whose
+    /// escrow expires before the voting window it promises.
+    #[test]
+    fn registration_refuses_a_clock_that_does_not_fit() {
+        assert_eq!(
+            register(u64::MAX, &profile(), 34, VOTING_PERIOD, &registration()),
+            Err(RegisterError::TimeOverflow)
         );
     }
 

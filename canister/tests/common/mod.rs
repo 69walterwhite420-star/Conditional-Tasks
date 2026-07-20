@@ -188,6 +188,9 @@ pub fn sign(wallet: &Wallet, message: &[u8]) -> Vec<u8> {
 #[derive(Debug)]
 pub struct Registered {
     pub task_id: Vec<u8>,
+    /// The commitment the donor actually signed, for tests that check the
+    /// canister stored it verbatim.
+    pub text_hash: Vec<u8>,
 }
 
 pub fn register(
@@ -231,14 +234,14 @@ pub fn register(
         resolver: ByteBuf::from(resolver.to_vec()),
         nonce,
         duration: DURATION,
-        text_hash: ByteBuf::from(text_hash),
+        text_hash: ByteBuf::from(text_hash.clone()),
         signature: ByteBuf::from(sign(donor, message.as_bytes())),
     };
     let (result,): (Result<ByteBuf, String>,) =
         update(pic, canister, "register_task", Encode!(&arg).unwrap());
     result.map(|id| {
         assert_eq!(id.as_slice(), task_id.as_slice(), "task_id parity");
-        Registered { task_id }
+        Registered { task_id, text_hash }
     })
 }
 

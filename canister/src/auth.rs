@@ -250,16 +250,22 @@ pub fn derive_task_id(
 /// Deploy-time validation: every baked chain entry must parse. A canister
 /// with a malformed config must not exist.
 pub fn validate_config() -> Result<(), AuthError> {
+    validate(crate::OPERATOR_WALLET, crate::CHAINS)
+}
+
+/// The rules themselves, over the values instead of the statics, so every
+/// rejection branch can be exercised without rebuilding the wasm.
+fn validate(operator_wallet: &str, chains: &[ChainSpec]) -> Result<(), AuthError> {
     // The operator wallet is empty until a real deploy pins it (like the
     // book principal); non-empty it must be a valid address.
-    if !crate::OPERATOR_WALLET.is_empty() {
-        bs58::decode(crate::OPERATOR_WALLET)
+    if !operator_wallet.is_empty() {
+        bs58::decode(operator_wallet)
             .into_vec()
             .ok()
             .filter(|b| b.len() == 32)
             .ok_or(AuthError::MalformedConfig)?;
     }
-    for (i, spec) in crate::CHAINS.iter().enumerate() {
+    for (i, spec) in chains.iter().enumerate() {
         bs58::decode(spec.factory)
             .into_vec()
             .ok()
@@ -298,7 +304,7 @@ pub fn validate_config() -> Result<(), AuthError> {
         // for the same birth fields and one verdict message, and the single
         // resolver key could then sign two outcomes for one escrow. Refuse
         // such a config to exist.
-        for other in crate::CHAINS.iter().skip(i + 1) {
+        for other in chains.iter().skip(i + 1) {
             if spec.id == other.id || spec.domain == other.domain || spec.factory == other.factory {
                 return Err(AuthError::MalformedConfig);
             }
@@ -665,5 +671,136 @@ mod tests {
     #[test]
     fn baked_config_is_valid() {
         validate_config().unwrap();
+    }
+
+    // ---- config rejections ------------------------------------------------
+
+    /// base58 of [0x44; 32] — a well-formed address, reused wherever a case
+    /// needs one that is merely *different* from the base spec's.
+    const GOOD_ADDRESS: &str = "5bV6jUfhDHCQVA1WfKBUnXUsboJgoKgkzkKcxr3joew5";
+
+    /// A second chain that collides with `spec()` in nothing.
+    fn other_spec() -> ChainSpec {
+        ChainSpec {
+            id: "solana-mainnet",
+            factory: GOOD_ADDRESS,
+            domain: "crown:two-outcome:solana-mainnet",
+            ..spec()
+        }
+    }
+
+    /// An unpinned operator wallet is legal — that is the pre-deploy state
+    /// of every profile, and `operator_wallet()` simply answers `None`.
+    #[test]
+    fn empty_operator_wallet_is_legal() {
+        assert!(validate("", &[spec()]).is_ok());
+        assert!(validate(GOOD_ADDRESS, &[spec()]).is_ok());
+    }
+
+    /// A wallet that is not a 32-byte address would be baked as the operator
+    /// and then never decode, silently disarming the refund button — so the
+    /// canister must refuse to exist instead.
+    #[test]
+    fn malformed_operator_wallet_is_refused() {
+        // Not the base58 alphabet at all.
+        assert_eq!(validate("0OIl", &[spec()]), Err(AuthError::MalformedConfig));
+        // Right alphabet, wrong length.
+        assert_eq!(validate("abc", &[spec()]), Err(AuthError::MalformedConfig));
+    }
+
+    /// Per-chain field rejections. Each field, if it stopped being checked,
+    /// produces a canister that cannot be honest: an unparsable factory or
+    /// fee wallet derives task_ids for escrows that will never exist, a fee
+    /// of 100% or a zero floor bakes a price the shape cannot honour, and an
+    /// empty domain signs verdicts under no cluster at all.
+    #[test]
+    fn malformed_chain_fields_are_refused() {
+        let bad = |spec: ChainSpec| {
+            assert_eq!(
+                validate(GOOD_ADDRESS, &[spec]),
+                Err(AuthError::MalformedConfig)
+            );
+        };
+        bad(ChainSpec {
+            factory: "0OIl",
+            ..spec()
+        });
+        bad(ChainSpec {
+            fee_wallet: "abc",
+            ..spec()
+        });
+        bad(ChainSpec {
+            fee_bps: 10_000,
+            ..spec()
+        });
+        bad(ChainSpec {
+            domain: "",
+            ..spec()
+        });
+        bad(ChainSpec {
+            min_gross: 0,
+            ..spec()
+        });
+        // The boundary below the full-fee refusal still passes.
+        assert!(
+            validate(
+                GOOD_ADDRESS,
+                &[ChainSpec {
+                    fee_bps: 9_999,
+                    ..spec()
+                }]
+            )
+            .is_ok()
+        );
+    }
+
+    /// The chain id is a value in the signed text. Anything that can break a
+    /// line, pad a line or collide with the `key: value` separator would let
+    /// one chain id render a message another chain id also renders — one
+    /// signature, two doors.
+    #[test]
+    fn unrenderable_chain_ids_are_refused() {
+        for id in [
+            "",
+            "solana:devnet",
+            "solana devnet",
+            "solana\ndevnet",
+            "café",
+        ] {
+            assert_eq!(
+                validate(GOOD_ADDRESS, &[ChainSpec { id, ..spec() }]),
+                Err(AuthError::MalformedConfig),
+                "accepted chain id {id:?}"
+            );
+        }
+    }
+
+    /// Two chains sharing an id, a domain or a factory collapse into one
+    /// escrow address and one verdict message: the single resolver key could
+    /// then sign both outcomes of the same escrow. Distinct in all three is
+    /// the only legal shape.
+    #[test]
+    fn colliding_chain_pairs_are_refused() {
+        assert!(validate(GOOD_ADDRESS, &[spec(), other_spec()]).is_ok());
+
+        for collision in [
+            ChainSpec {
+                id: spec().id,
+                ..other_spec()
+            },
+            ChainSpec {
+                domain: spec().domain,
+                ..other_spec()
+            },
+            ChainSpec {
+                factory: spec().factory,
+                ..other_spec()
+            },
+        ] {
+            assert_eq!(
+                validate(GOOD_ADDRESS, &[spec(), collision]),
+                Err(AuthError::MalformedConfig)
+            );
+        }
     }
 }

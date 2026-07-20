@@ -405,11 +405,17 @@ pub(crate) fn crown_index() -> Option<candid::Principal> {
 /// The operator wallet: the override if set, else the baked config value.
 /// `None` while neither pins one — then no operator refund exists.
 pub(crate) fn operator_wallet() -> Option<[u8; 32]> {
-    let stored = OPERATOR_WALLET_OVERRIDE.with_borrow(|cell| cell.get().clone());
-    let bytes = if stored.is_empty() {
-        bs58::decode(OPERATOR_WALLET).into_vec().ok()?
+    OPERATOR_WALLET_OVERRIDE.with_borrow(|cell| resolve_operator(cell.get(), OPERATOR_WALLET))
+}
+
+/// The resolution rule over the values instead of the statics, like
+/// `weight::resolve`: the baked profile of a test build always pins a
+/// wallet, so this is the only way to reach the unpinned case.
+fn resolve_operator(override_bytes: &[u8], baked: &str) -> Option<[u8; 32]> {
+    let bytes = if override_bytes.is_empty() {
+        bs58::decode(baked).into_vec().ok()?
     } else {
-        stored
+        override_bytes.to_vec()
     };
     bytes.try_into().ok()
 }
@@ -504,4 +510,36 @@ fn global_timer() {
     ic_cdk::futures::internals::in_executor_context(|| {
         ic_cdk::futures::spawn(sweep());
     });
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing
+)]
+mod tests {
+    use super::*;
+
+    /// base58 of [0x44; 32].
+    const PINNED: &str = "5bV6jUfhDHCQVA1WfKBUnXUsboJgoKgkzkKcxr3joew5";
+
+    /// A profile that pins no operator has no operator, and the operator
+    /// methods answer "no operator wallet configured". If this ever resolves
+    /// to Some anyway, an unpinned deploy grows a censorship button whose
+    /// holder nobody declared — and the mainnet profile is exactly such a
+    /// deploy until G5 pins the wallet.
+    #[test]
+    fn an_unpinned_operator_wallet_stays_none() {
+        assert_eq!(resolve_operator(&[], ""), None);
+        // Nor does a baked value that is not a 32-byte address become one.
+        assert_eq!(resolve_operator(&[], "0OIl"), None);
+        assert_eq!(resolve_operator(&[], "abc"), None);
+        // A pinned wallet resolves, and the local-testing override wins
+        // over it — the harness installs every test instance that way.
+        assert_eq!(resolve_operator(&[], PINNED), Some([0x44; 32]));
+        assert_eq!(resolve_operator(&[7; 32], PINNED), Some([7; 32]));
+    }
 }
