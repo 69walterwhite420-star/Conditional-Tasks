@@ -151,7 +151,7 @@ factories = ["$(core_value factories)"]
 EOF
 (cd "$CORE" && CROWN_PROFILE=local \
     CC_wasm32_unknown_unknown="$CORE/scripts/wasm-cc.sh" \
-    AR_wasm32_unknown_unknown="${AR_WASM32:-$HOME/.cache/solana/v1.53/platform-tools/llvm/bin/llvm-ar}" \
+    AR_wasm32_unknown_unknown="${AR_WASM32:-$(command -v llvm-ar || ls -d "$HOME"/.cache/solana/*/platform-tools/llvm/bin/llvm-ar 2>/dev/null | sort -V | tail -1 | grep . || echo "$HOME/.cache/zig/zig-ar")}" \
     cargo build --target wasm32-unknown-unknown --release -p crown-index)
 
 # THE LOCAL REPLICA IS SHARED AND IS NEVER WIPED HERE: threshold keys born by
