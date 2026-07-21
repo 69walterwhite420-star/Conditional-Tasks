@@ -19,6 +19,11 @@ jobs:
         with:
           repository: bocchisan/Crown-Factory
           path: Crown-Factory
+      # The e2e driver pins the splitter by path into Crown-Core; check it too.
+      - uses: actions/checkout@v4
+        with:
+          repository: bocchisan/Crown-Core
+          path: Crown-Core
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -38,5 +43,8 @@ jobs:
       # Without this the whole PocketIC layer never runs in CI.
       - run: ./scripts/test-canister.sh
       - run: ./scripts/lint-boundaries.sh
+      # The e2e driver is out of the workspace (its path deps reach into the
+      # sibling repos), so nothing else compiles it: check it explicitly.
+      - run: cargo check --manifest-path e2e/solana-driver/Cargo.toml
       - name: core and factory untouched
-        run: '! git ls-files | grep -E "^(crown-core|crown-factory)/"'
+        run: '! git ls-files | grep -iE "^(crown-core|crown-factory)/"'
