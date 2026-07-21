@@ -15,6 +15,44 @@ use serde_bytes::ByteBuf;
 
 #[test]
 #[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
+fn many_simultaneous_deadlines_all_finalize() {
+    // A burst of tasks all coming due in one window must not wedge the timer:
+    // process_due caps its work per tick and drains the rest on the
+    // near-immediate follow-up tick, so every one still finalizes.
+    let (pic, canister) = setup();
+    let donor = wallet(1);
+    let recipient = wallet(2);
+
+    let n: u64 = 120; // > MAX_DUE_PER_TICK (50): forces multi-tick draining.
+    let ids: Vec<Vec<u8>> = (0..n)
+        .map(|i| {
+            register(&pic, canister, &donor, &recipient.address, i + 1)
+                .unwrap()
+                .task_id
+        })
+        .collect();
+
+    pic.advance_time(std::time::Duration::from_secs(DURATION + 5));
+    // Several ticks: the first caps out, each schedules a 1s follow-up. Advance
+    // a second between ticks so the re-armed timer is due.
+    for _ in 0..6 {
+        pic.tick();
+        pic.advance_time(std::time::Duration::from_secs(2));
+    }
+
+    for id in &ids {
+        assert_eq!(
+            task_state(&fetch_task(&pic, canister, id)).state,
+            conditional_tasks::StateView::Decided {
+                outcome: conditional_tasks::OutcomeView::Cancel
+            },
+            "every task in the burst finalized"
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
 fn full_flow_with_certificates() {
     let (pic, canister) = setup();
     let donor = wallet(1);

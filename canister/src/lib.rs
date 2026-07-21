@@ -367,15 +367,26 @@ pub(crate) fn now_seconds() -> u64 {
     ic_cdk::api::time() / 1_000_000_000
 }
 
-/// Applies due time transitions to every task whose due moment has passed.
-/// Saving re-inserts the task's next due time, so a task that expires and
-/// then finishes voting is handled in one sweep.
-fn process_due(now: u64) {
-    loop {
+/// How many due tasks one timer tick processes before yielding. Bounds a
+/// single message's work so a burst of simultaneous deadlines — e.g. many
+/// tasks registered with the same short `duration` — cannot exceed the
+/// instruction limit and trap the tick into an endless retry of the same
+/// oversized batch. Each processed entry becomes `Decided` (terminal, out of
+/// the index), so progress is monotonic and the remainder drains next tick.
+const MAX_DUE_PER_TICK: usize = 50;
+
+/// Applies due time transitions to at most `MAX_DUE_PER_TICK` tasks whose due
+/// moment has passed. Saving re-inserts the task's next due time, so a task
+/// that expires and then finishes voting is handled across sweeps. Returns
+/// `true` if due entries remain past the cap.
+fn process_due(now: u64) -> bool {
+    for _ in 0..MAX_DUE_PER_TICK {
         let entry = DUE.with_borrow(|set| set.first().cloned());
-        let Some((due, key)) = entry else { break };
+        let Some((due, key)) = entry else {
+            return false;
+        };
         if due > now {
-            break;
+            return false;
         }
         DUE.with_borrow_mut(|set| set.remove(&(due, key.clone())));
         let Some(mut record) = load_task(&key) else {
@@ -391,6 +402,8 @@ fn process_due(now: u64) {
             save_task(&record);
         }
     }
+    // Hit the cap: report whether the next entry is still due now.
+    DUE.with_borrow(|set| set.first().is_some_and(|(due, _)| *due <= now))
 }
 
 fn schedule_tick(delay: Duration) {
@@ -498,15 +511,22 @@ async fn sweep() {
     }
     let _guard = SweepGuard;
     sign::ensure_resolver_keys().await;
-    process_due(now_seconds());
     sign::sign_pending().await;
 }
 
 #[cfg_attr(target_family = "wasm", unsafe(export_name = "canister_global_timer"))]
 #[allow(dead_code)]
 fn global_timer() {
-    // Re-arm first: a trap inside the sweep must not stop the schedule.
+    // Re-arm first: a trap inside the sweep must not stop the schedule. Drain
+    // the due index synchronously here, decoupled from the async signing
+    // sweep, so a signing backlog never starves finalization; when the
+    // per-tick cap leaves due work behind, drain the rest on a near-immediate
+    // follow-up tick (the later set wins). Newly `Decided` tasks are visible
+    // to `sign_pending` in the sweep spawned just below.
     schedule_tick(TICK_INTERVAL);
+    if process_due(now_seconds()) {
+        schedule_tick(Duration::from_secs(1));
+    }
     ic_cdk::futures::internals::in_executor_context(|| {
         ic_cdk::futures::spawn(sweep());
     });
