@@ -97,8 +97,8 @@ pub enum StepError {
 }
 
 /// Validates a registration and births the task in CREATED. On `Err` no
-/// task exists. `floor` is the shape's on-chain minimum from the config;
-/// the profile's own `min_gross` may only be stricter.
+/// task exists. `floor` is the game's own acceptance floor (config
+/// `min_gross`); the profile's own `min_gross` may only be stricter.
 pub fn register(
     now: u64,
     profile: &ProfileParams,
@@ -612,12 +612,12 @@ mod tests {
 
     #[test]
     fn registration_rejections_and_boundaries() {
-        let ch = profile();
+        let params = profile();
         let reg = registration();
 
         let disabled = ProfileParams {
             enabled: false,
-            ..ch.clone()
+            ..params.clone()
         };
         assert_eq!(
             register(T0, &disabled, 34, VOTING_PERIOD, &reg),
@@ -629,26 +629,26 @@ mod tests {
             ..reg.clone()
         };
         assert_eq!(
-            register(T0, &ch, 34, VOTING_PERIOD, &below_floor),
+            register(T0, &params, 34, VOTING_PERIOD, &below_floor),
             Err(RegisterError::GrossBelowFloor)
         );
 
         let strict = ProfileParams {
             min_gross: 1_000_000,
-            ..ch.clone()
+            ..params.clone()
         };
-        let below_channel = Registration {
+        let below_min = Registration {
             gross: 999_999,
             ..reg.clone()
         };
         assert_eq!(
-            register(T0, &strict, 34, VOTING_PERIOD, &below_channel),
+            register(T0, &strict, 34, VOTING_PERIOD, &below_min),
             Err(RegisterError::GrossBelowMinimum)
         );
 
         let reputable = ProfileParams {
             min_reputation: 1,
-            ..ch.clone()
+            ..params.clone()
         };
         assert_eq!(
             register(T0, &reputable, 34, VOTING_PERIOD, &reg),
@@ -660,7 +660,7 @@ mod tests {
             ..reg.clone()
         };
         assert_eq!(
-            register(T0, &ch, 34, VOTING_PERIOD, &short),
+            register(T0, &params, 34, VOTING_PERIOD, &short),
             Err(RegisterError::DurationOutOfRange)
         );
         let long = Registration {
@@ -668,7 +668,7 @@ mod tests {
             ..reg.clone()
         };
         assert_eq!(
-            register(T0, &ch, 34, VOTING_PERIOD, &long),
+            register(T0, &params, 34, VOTING_PERIOD, &long),
             Err(RegisterError::DurationOutOfRange)
         );
 
@@ -677,13 +677,13 @@ mod tests {
             deadline: T0 + DURATION + VOTING_PERIOD + DEADLINE_MARGIN,
             ..reg.clone()
         };
-        assert!(register(T0, &ch, 34, VOTING_PERIOD, &exact).is_ok());
+        assert!(register(T0, &params, 34, VOTING_PERIOD, &exact).is_ok());
         let tight = Registration {
             deadline: T0 + DURATION + VOTING_PERIOD + DEADLINE_MARGIN - 1,
             ..reg
         };
         assert_eq!(
-            register(T0, &ch, 34, VOTING_PERIOD, &tight),
+            register(T0, &params, 34, VOTING_PERIOD, &tight),
             Err(RegisterError::DeadlineTooTight)
         );
     }

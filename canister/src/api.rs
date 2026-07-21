@@ -22,7 +22,7 @@ fn step_error_text(error: logic::StepError) -> String {
 fn register_error_text(error: logic::RegisterError) -> String {
     match error {
         logic::RegisterError::ProfileDisabled => "profile disabled",
-        logic::RegisterError::GrossBelowFloor => "gross below the shape floor",
+        logic::RegisterError::GrossBelowFloor => "gross below the game floor",
         logic::RegisterError::GrossBelowMinimum => "gross below the profile minimum",
         logic::RegisterError::ReputationBelowMinimum => {
             "donor reputation below the profile minimum"
@@ -128,7 +128,9 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
     )
     .map_err(register_error_text)?;
 
-    let mut record = crate::TaskRecord {
+    // A fresh task is CREATED with no votes, exactly what these fields carry;
+    // no absorb needed here — the state machine has not moved yet.
+    let record = crate::TaskRecord {
         chain: arg.chain,
         task_id: ByteBuf::from(task_id.clone()),
         donor: arg.donor,
@@ -146,7 +148,6 @@ async fn register_task(arg: RegisterArg) -> Result<ByteBuf, String> {
         verdict_signature: None,
         operator_refunded_at: None,
     };
-    record.absorb(&task);
     crate::save_task(&record);
     Ok(ByteBuf::from(task_id))
 }
@@ -216,7 +217,7 @@ pub struct VoteArg {
     pub signature: ByteBuf,
 }
 
-/// One vote (docs/game-spec.md §6). Order: clock, signature, dedup, then the
+/// One vote (docs/game-spec.md §6). Order: signature, clock, dedup, then the
 /// paid weight call; the machine revalidates everything after the await —
 /// the voting window may have closed while the book was answering.
 #[ic_cdk::update]
@@ -327,7 +328,7 @@ pub struct ProfileArg {
 fn set_profile(arg: ProfileArg) -> Result<(), String> {
     let spec = auth::spec_of(&arg.chain).map_err(|e| e.text().to_string())?;
     if arg.min_gross < spec.min_gross {
-        return Err("profile minimum below the shape floor".to_string());
+        return Err("profile minimum below the game floor".to_string());
     }
     let current = crate::load_profile(&arg.chain, &arg.recipient, spec.min_gross);
     if arg.counter <= current.counter {
@@ -344,7 +345,7 @@ fn set_profile(arg: ProfileArg) -> Result<(), String> {
     );
     auth::verify_wallet_signature(message.as_bytes(), &arg.signature, &arg.recipient)
         .map_err(|e| e.text().to_string())?;
-    crate::save_channel(
+    crate::save_profile(
         &arg.chain,
         &arg.recipient,
         &crate::ProfileRecord {

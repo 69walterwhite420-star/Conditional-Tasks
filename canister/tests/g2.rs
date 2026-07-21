@@ -418,7 +418,7 @@ fn decline_after_accept_frees_the_task() {
 
 #[test]
 #[ignore = "needs pocket-ic; run scripts/test-canister.sh"]
-fn channel_params_counter_and_floor() {
+fn profile_params_counter_and_floor() {
     let (pic, canister) = setup();
     let donor = wallet(1);
     let recipient = wallet(2);

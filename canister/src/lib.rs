@@ -41,7 +41,7 @@ include!(concat!(env!("OUT_DIR"), "/profile.rs"));
 pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 pub(crate) const TASKS_MEMORY: MemoryId = MemoryId::new(0);
-pub(crate) const CHANNELS_MEMORY: MemoryId = MemoryId::new(1);
+pub(crate) const PROFILES_MEMORY: MemoryId = MemoryId::new(1);
 pub(crate) const CROWN_INDEX_MEMORY: MemoryId = MemoryId::new(2);
 pub(crate) const SCHNORR_KEY_MEMORY: MemoryId = MemoryId::new(3);
 pub(crate) const OPERATOR_WALLET_MEMORY: MemoryId = MemoryId::new(4);
@@ -58,8 +58,8 @@ thread_local! {
     /// length-prefixed (chain, task_id) / (chain, recipient) pairs.
     static TASKS: RefCell<StableBTreeMap<Vec<u8>, Vec<u8>, Memory>> =
         RefCell::new(StableBTreeMap::init(memory(TASKS_MEMORY)));
-    static CHANNELS: RefCell<StableBTreeMap<Vec<u8>, Vec<u8>, Memory>> =
-        RefCell::new(StableBTreeMap::init(memory(CHANNELS_MEMORY)));
+    static PROFILES: RefCell<StableBTreeMap<Vec<u8>, Vec<u8>, Memory>> =
+        RefCell::new(StableBTreeMap::init(memory(PROFILES_MEMORY)));
 
     /// (due time, task key) of every undecided task; heap index over stable
     /// truth, rebuilt on upgrade. Stale entries are harmless: processing a
@@ -326,13 +326,13 @@ fn due_of(record: &TaskRecord) -> Option<u64> {
 }
 
 pub(crate) fn load_profile(chain: &str, recipient: &[u8], floor: u64) -> ProfileRecord {
-    CHANNELS
+    PROFILES
         .with_borrow(|profiles| profiles.get(&profile_key(chain, recipient)))
         .map(|bytes| match Decode!(&bytes, ProfileRecord) {
             Ok(record) => record,
             Err(_) => ic_cdk::trap("stable profiles: undecodable record"),
         })
-        // A profile nobody configured accepts tasks at the shape floor:
+        // A profile nobody configured accepts tasks at the game floor:
         // permissionless by default, the recipient simply never accepts.
         .unwrap_or(ProfileRecord {
             min_gross: floor,
@@ -342,12 +342,12 @@ pub(crate) fn load_profile(chain: &str, recipient: &[u8], floor: u64) -> Profile
         })
 }
 
-pub(crate) fn save_channel(chain: &str, recipient: &[u8], record: &ProfileRecord) {
+pub(crate) fn save_profile(chain: &str, recipient: &[u8], record: &ProfileRecord) {
     let bytes = match Encode!(record) {
         Ok(bytes) => bytes,
         Err(_) => ic_cdk::trap("profile record: encode failed"),
     };
-    CHANNELS.with_borrow_mut(|profiles| profiles.insert(profile_key(chain, recipient), bytes));
+    PROFILES.with_borrow_mut(|profiles| profiles.insert(profile_key(chain, recipient), bytes));
 }
 
 pub(crate) fn tasks_of_recipient(chain: &str, recipient: &[u8]) -> Vec<Vec<u8>> {
@@ -527,6 +527,8 @@ fn global_timer() {
     if process_due(now_seconds()) {
         schedule_tick(Duration::from_secs(1));
     }
+    // futures::internals is not a stable ic-cdk surface; the exact version is
+    // pinned by Cargo.lock — revisit this call on any ic-cdk bump.
     ic_cdk::futures::internals::in_executor_context(|| {
         ic_cdk::futures::spawn(sweep());
     });

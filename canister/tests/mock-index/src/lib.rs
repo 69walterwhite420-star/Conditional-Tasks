@@ -14,17 +14,17 @@ thread_local! {
 }
 
 #[ic_cdk::update]
-fn set_reputation(chain: String, fee_payer: ByteBuf, recipient: ByteBuf, value: u128) {
+fn set_reputation(chain: String, donor: ByteBuf, recipient: ByteBuf, value: u128) {
     BOOK.with_borrow_mut(|book| {
-        book.insert((chain, fee_payer.into_vec(), recipient.into_vec()), value);
+        book.insert((chain, donor.into_vec(), recipient.into_vec()), value);
     });
 }
 
 #[ic_cdk::query]
-fn get_reputation(chain: String, fee_payer: ByteBuf, recipient: ByteBuf) -> Nat {
+fn get_reputation(chain: String, donor: ByteBuf, recipient: ByteBuf) -> Nat {
     BOOK.with_borrow(|book| {
         Nat::from(
-            book.get(&(chain, fee_payer.into_vec(), recipient.into_vec()))
+            book.get(&(chain, donor.into_vec(), recipient.into_vec()))
                 .copied()
                 .unwrap_or(0),
         )

@@ -2,6 +2,10 @@
 // vote, set_profile, operator_refund} may ever appear as non-query
 // methods; the CI lint fails on anything else.
 
+// Task / State / Vote / Choice / Outcome / Profile below are not carried by
+// any service signature: they document the Candid encoding of the certified
+// `data` blob that get_task returns (canister lib.rs), so a reader can decode
+// it without the canister source.
 type Outcome = variant { settle; cancel };
 type State = variant {
   created;

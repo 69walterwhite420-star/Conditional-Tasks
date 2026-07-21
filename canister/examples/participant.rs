@@ -9,10 +9,7 @@
 //!   participant task-message <chain> <canister-principal> <task_id_hex> <action> [args]
 //!       action: register <text_hash_hex> <duration> | accept | decline | ready
 //!               | vote <done|not_done>
-//!   participant profile-message <chain> <canister> <recipient_hex> <min_gross>
-//!                               <min_reputation> <enabled> <counter>
 //!   participant sol-sign <keypair.json> <message-file>
-//!   participant sol-address <keypair.json>
 
 use candid::Principal;
 use conditional_tasks::auth::{self, Action, Choice};
@@ -62,33 +59,6 @@ fn main() {
             };
             auth::task_message(chain, &canister.to_text(), &task_id, &action)
         }
-        Some("profile-message") => {
-            let [
-                chain,
-                canister,
-                recipient,
-                min_gross,
-                min_reputation,
-                enabled,
-                counter,
-            ] = &args[2..]
-            else {
-                panic!(
-                    "profile-message <chain> <canister> <recipient_hex> <min_gross> \
-                     <min_reputation> <enabled> <counter>"
-                );
-            };
-            let canister = Principal::from_text(canister).expect("principal");
-            auth::profile_message(
-                chain,
-                &canister.to_text(),
-                &hex_arg(recipient),
-                min_gross.parse().expect("min_gross"),
-                min_reputation.parse().expect("min_reputation"),
-                enabled.parse().expect("enabled"),
-                counter.parse().expect("counter"),
-            )
-        }
         // The message is text with newlines in it, so it travels by file.
         Some("sol-sign") => {
             let [keypair, message_file] = &args[2..] else {
@@ -98,12 +68,6 @@ fn main() {
             let key = solana_key(keypair);
             let message = std::fs::read(message_file).expect("message file");
             hex::encode(key.sign(&message).to_bytes())
-        }
-        Some("sol-address") => {
-            let [keypair] = &args[2..] else {
-                panic!("sol-address <keypair.json>");
-            };
-            hex::encode(solana_key(keypair).verifying_key().to_bytes())
         }
         _ => panic!("unknown subcommand"),
     };
