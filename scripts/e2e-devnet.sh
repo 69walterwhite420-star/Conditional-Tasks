@@ -191,6 +191,7 @@ ingest_price  = 10_000_000_000
 min_gross     = 1
 attach_cycles = 10_000_000_000
 cycle_floor   = 1_000_000_000
+max_attributions = 1
 
 [[chain]]
 id        = "solana-devnet"
